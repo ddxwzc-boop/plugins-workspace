@@ -23,24 +23,27 @@ use crate::{error::Error, models::AccountInfo};
 
 type Result<T> = std::result::Result<T, Error>;
 
-/// Resolves the `OpenHarmonyApp` from the global OHOS APP handle.
-fn app() -> Result<std::sync::MutexGuard<'static, Option<openharmony_ability::OpenHarmonyApp>>> {
-    tauri::ohos::APP
+/// Builds a `HuaweiAccount` bound to the process-wide OHOS app.
+///
+/// The `APP` mutex guard is fully dropped before this returns (the client holds
+/// its own `BridgeRuntime` clone), so callers may `.await` freely — the `!Send`
+/// guard never crosses an await point. Same shape as the accessibility and
+/// screenshot plugins' `client()` helpers.
+fn account() -> Result<openharmony_ability::HuaweiAccount> {
+    let guard = tauri::ohos::APP
         .lock()
-        .map_err(|_| Error::from_napi_reason("OHOS APP mutex poisoned"))
+        .map_err(|_| Error::from_napi_reason("OHOS APP mutex poisoned"))?;
+    let app = guard
+        .as_ref()
+        .ok_or_else(|| Error::from_napi_reason("OHOS APP not initialized"))?;
+    openharmony_ability::HuaweiAccount::new(app)
+        .map_err(|e| Error::from_napi_reason(&e.reason))
 }
 
 /// Interactive login — forces the Huawei account login UI.
 #[tauri::command]
 pub async fn login() -> Result<AccountInfo> {
-    let account = {
-        let guard = app()?;
-        let app_ref = guard
-            .as_ref()
-            .ok_or_else(|| Error::from_napi_reason("OHOS APP not initialized"))?;
-        openharmony_ability::HuaweiAccount::new(app_ref)
-            .map_err(|e| Error::from_napi_reason(&e.reason))?
-    }; // guard dropped before await
+    let account = account()?;
 
     let info = account
         .login()
@@ -52,14 +55,7 @@ pub async fn login() -> Result<AccountInfo> {
 /// Silent login — no UI; succeeds only when already logged in & authorized.
 #[tauri::command]
 pub async fn silent_login() -> Result<AccountInfo> {
-    let account = {
-        let guard = app()?;
-        let app_ref = guard
-            .as_ref()
-            .ok_or_else(|| Error::from_napi_reason("OHOS APP not initialized"))?;
-        openharmony_ability::HuaweiAccount::new(app_ref)
-            .map_err(|e| Error::from_napi_reason(&e.reason))?
-    }; // guard dropped before await
+    let account = account()?;
 
     let info = account
         .silent_login()
@@ -71,14 +67,7 @@ pub async fn silent_login() -> Result<AccountInfo> {
 /// Logout — cancels the app's Huawei account authorization (p1 design D8).
 #[tauri::command]
 pub async fn logout() -> Result<()> {
-    let account = {
-        let guard = app()?;
-        let app_ref = guard
-            .as_ref()
-            .ok_or_else(|| Error::from_napi_reason("OHOS APP not initialized"))?;
-        openharmony_ability::HuaweiAccount::new(app_ref)
-            .map_err(|e| Error::from_napi_reason(&e.reason))?
-    }; // guard dropped before await
+    let account = account()?;
 
     account
         .logout()
