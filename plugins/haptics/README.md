@@ -1,6 +1,6 @@
 ![haptics](https://github.com/tauri-apps/plugins-workspace/raw/v2/plugins/haptics/banner.png)
 
-Haptic feedback and vibrations on Android and iOS.
+Haptic feedback and vibrations on Android, iOS and OpenHarmony.
 
 There are no standards/requirements for vibration support on Android, so the `feedback` APIs may not work correctly on more affordable phones, including recently released ones.
 

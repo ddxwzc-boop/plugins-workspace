@@ -1,7 +1,7 @@
 [package]
 name = "tauri-plugin-biometric"
 version = "2.3.2"
-description = "Prompt the user for biometric authentication on Android and iOS."
+description = "Prompt the user for biometric authentication on Android, iOS and OpenHarmony."
 edition = { workspace = true }
 authors = { workspace = true }
 license = { workspace = true }
@@ -17,6 +17,7 @@ linux = { level = "none", notes = "" }
 macos = { level = "none", notes = "" }
 android = { level = "full", notes = "" }
 ios = { level = "full", notes = "" }
+openharmony = { level = "partial", notes = "status + authenticate via the system userAuth widget; only reason/title options honored (see README)" }
 
 
 [build-dependencies]

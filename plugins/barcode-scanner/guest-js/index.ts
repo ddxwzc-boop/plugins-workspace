@@ -45,8 +45,19 @@ export enum Format {
 }
 
 export interface ScanOptions {
+  /**
+   * Not supported on OpenHarmony: the system scan page always uses the back camera.
+   */
   cameraDirection?: 'back' | 'front'
+  /**
+   * Formats to scan for. On OpenHarmony, `ITF` filters as ITF-14 (Scan Kit has
+   * no plain ITF type), the GS1 DataBar formats are not supported, and
+   * unsupported values are ignored.
+   */
   formats?: Format[]
+  /**
+   * Not supported on OpenHarmony: the system scan page is always fullscreen.
+   */
   windowed?: boolean
 }
 

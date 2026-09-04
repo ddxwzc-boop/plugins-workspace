@@ -9,6 +9,7 @@ Allows your mobile application to use the camera to scan QR codes, EAN-13 and ot
 | macOS    | x         |
 | Android  | ✓         |
 | iOS      | ✓         |
+| OpenHarmony | ✓      |
 
 ## Install
 
@@ -66,6 +67,15 @@ import { scan } from '@tauri-apps/plugin-barcode-scanner'
 // make sure your user interface is ready to show what is underneath with a transparent element
 scan({ windowed: true, formats: [''] })
 ```
+
+### OpenHarmony
+
+`scan` opens the system Scan Kit page (fullscreen, back camera) and resolves with the first scanned code. Option support:
+
+- `formats` — honored: known `Format` values are mapped to Scan Kit code types; unknown values are ignored, and an empty or fully-unsupported list falls back to all code types. `ITF` filters as ITF-14 (Scan Kit has no plain ITF type), and the GS1 DataBar formats are not supported.
+- `cameraDirection` — ignored: the system page always uses the back camera.
+- `windowed` — ignored: the system page is always fullscreen.
+- `cancel` — no-op: the system page closes itself on scan or back press.
 
 ## Contributing
 

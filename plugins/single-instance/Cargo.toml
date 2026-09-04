@@ -13,7 +13,7 @@ exclude = ["/examples"]
 windows = { level = "full", notes = "" }
 linux = { level = "full", notes = "" }
 macos = { level = "full", notes = "" }
-ohos = { level = "full", notes = "Uses OS singleton + onNewWant" }
+openharmony = { level = "full", notes = "Uses OS singleton + onNewWant" }
 android = { level = "none", notes = "" }
 ios = { level = "none", notes = "" }
 

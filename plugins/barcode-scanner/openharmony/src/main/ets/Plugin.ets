@@ -33,6 +33,83 @@ function permissionStateToString(state: number): string {
   return 'prompt';
 }
 
+// ─── Format mapping (Tauri Format string ⇄ OHOS scanCore.ScanType) ───
+
+// Maps a Tauri guest-js `Format` enum value to the ScanType used to filter
+// the system scan page. Returns null for formats Scan Kit cannot filter on
+// (GS1_DATA_BAR*) — the caller skips them, mirroring the Android plugin's
+// supportedFormats() lookup. 'ITF' maps to ITF14_CODE: Scan Kit has no
+// plain-ITF code type.
+function formatToScanType(format: string): scanCore.ScanType | null {
+  switch (format) {
+    case 'QR_CODE':
+      return scanCore.ScanType.QR_CODE;
+    case 'UPC_A':
+      return scanCore.ScanType.UPC_A_CODE;
+    case 'UPC_E':
+      return scanCore.ScanType.UPC_E_CODE;
+    case 'EAN_8':
+      return scanCore.ScanType.EAN8_CODE;
+    case 'EAN_13':
+      return scanCore.ScanType.EAN13_CODE;
+    case 'CODE_39':
+      return scanCore.ScanType.CODE39_CODE;
+    case 'CODE_93':
+      return scanCore.ScanType.CODE93_CODE;
+    case 'CODE_128':
+      return scanCore.ScanType.CODE128_CODE;
+    case 'CODABAR':
+      return scanCore.ScanType.CODABAR_CODE;
+    case 'ITF':
+      return scanCore.ScanType.ITF14_CODE;
+    case 'AZTEC':
+      return scanCore.ScanType.AZTEC_CODE;
+    case 'DATA_MATRIX':
+      return scanCore.ScanType.DATAMATRIX_CODE;
+    case 'PDF_417':
+      return scanCore.ScanType.PDF417_CODE;
+    default:
+      return null;
+  }
+}
+
+// Reverse direction: ScanResult.scanType → Tauri `Format` enum value, so
+// Scanned.format matches the guest-js type instead of leaking the numeric
+// enum value (e.g. '11' for QR_CODE). Types without a Tauri counterpart
+// (MULTIFUNCTIONAL_CODE, ONE_D_CODE, …) fall back to the raw string.
+function scanTypeToFormat(scanType: scanCore.ScanType): string {
+  switch (scanType) {
+    case scanCore.ScanType.QR_CODE:
+      return 'QR_CODE';
+    case scanCore.ScanType.UPC_A_CODE:
+      return 'UPC_A';
+    case scanCore.ScanType.UPC_E_CODE:
+      return 'UPC_E';
+    case scanCore.ScanType.EAN8_CODE:
+      return 'EAN_8';
+    case scanCore.ScanType.EAN13_CODE:
+      return 'EAN_13';
+    case scanCore.ScanType.CODE39_CODE:
+      return 'CODE_39';
+    case scanCore.ScanType.CODE93_CODE:
+      return 'CODE_93';
+    case scanCore.ScanType.CODE128_CODE:
+      return 'CODE_128';
+    case scanCore.ScanType.CODABAR_CODE:
+      return 'CODABAR';
+    case scanCore.ScanType.ITF14_CODE:
+      return 'ITF';
+    case scanCore.ScanType.AZTEC_CODE:
+      return 'AZTEC';
+    case scanCore.ScanType.DATAMATRIX_CODE:
+      return 'DATA_MATRIX';
+    case scanCore.ScanType.PDF417_CODE:
+      return 'PDF_417';
+    default:
+      return String(scanType);
+  }
+}
+
 export class BarcodeScannerPlugin extends Plugin {
   // ─── Permission request fallback state ───
   // Tracks a pending requestPermissionsFromUser call so that it can be
@@ -78,8 +155,26 @@ export class BarcodeScannerPlugin extends Plugin {
       // so this may reject on configurations where context is unavailable.
       const options: ScanOptions = JSON.parse(invoke.parseArgs()) as ScanOptions;
 
+      // Honor the caller's format filter: map known Format strings to Scan
+      // Kit types and skip unknown ones (Android behavior); no formats (or
+      // none that Scan Kit supports) falls back to ALL. cameraDirection and
+      // windowed have no Scan Kit equivalent — the default UI is always
+      // fullscreen on the back camera (documented in the README).
+      const scanTypes: Array<scanCore.ScanType> = [];
+      if (options.formats != null) {
+        for (const format of options.formats) {
+          const scanType = formatToScanType(format);
+          if (scanType != null) {
+            scanTypes.push(scanType);
+          }
+        }
+      }
+      if (scanTypes.length === 0) {
+        scanTypes.push(scanCore.ScanType.ALL);
+      }
+
       const scanOptions: scanBarcode.ScanOptions = {
-        scanTypes: [scanCore.ScanType.ALL],
+        scanTypes: scanTypes,
         enableMultiMode: false,
         enableAlbum: true
       };
@@ -94,7 +189,7 @@ export class BarcodeScannerPlugin extends Plugin {
       const result = await scanBarcode.startScanForResult(this.context, scanOptions);
       const scanned: Scanned = {
         content: result.originalValue,
-        format: result.scanType != null ? String(result.scanType) : '',
+        format: scanTypeToFormat(result.scanType),
         bounds: null
       };
       invoke.resolve(JSON.stringify(scanned));

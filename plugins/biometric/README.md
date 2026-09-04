@@ -1,6 +1,6 @@
 ![biometric](https://github.com/tauri-apps/plugins-workspace/raw/v2/plugins/biometric/banner.png)
 
-Prompt the user for biometric authentication on Android and iOS.
+Prompt the user for biometric authentication on Android, iOS and OpenHarmony.
 
 | Platform | Supported |
 | -------- | --------- |
@@ -9,6 +9,7 @@ Prompt the user for biometric authentication on Android and iOS.
 | macOS    | x         |
 | Android  | ✓         |
 | iOS      | ✓         |
+| OpenHarmony | ✓      |
 
 ## Install
 
@@ -64,6 +65,15 @@ Afterwards all the plugin's APIs are available through the JavaScript guest bind
 import { authenticate } from '@tauri-apps/plugin-biometric'
 await authenticate('Open your wallet')
 ```
+
+### OpenHarmony
+
+`authenticate` opens the system user authentication widget (face or fingerprint, whichever the device supports — only that type is offered; there is no automatic PIN fallback). Only a subset of `AuthOptions` is honored:
+
+- `reason` — fallback for the dialog title.
+- `title` — the dialog title (falls back to `reason`, then "Authentication").
+
+The remaining options (`cancelTitle`, `fallbackTitle`, `subtitle`, `confirmationRequired`, `allowDeviceCredential`, `maxAttemps`) are not wired up on OHOS and are ignored (`cancelTitle`/`fallbackTitle` would map to the widget's `navigationButtonText`). `checkStatus` reports `isAvailable` plus `biometryType` (`1` fingerprint, `2` face).
 
 ## Contributing
 

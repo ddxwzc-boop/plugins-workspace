@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use crate::SingleInstanceCallback;
 use tauri::{
     plugin::{self, TauriPlugin},
-    AppHandle, Manager, RunEvent, Runtime,
+    Manager, RunEvent, Runtime,
 };
 
 pub fn init<R: Runtime>(cb: Box<SingleInstanceCallback<R>>) -> TauriPlugin<R> {

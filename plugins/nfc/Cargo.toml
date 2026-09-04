@@ -17,6 +17,7 @@ linux = { level = "none", notes = "" }
 macos = { level = "none", notes = "" }
 android = { level = "full", notes = "" }
 ios = { level = "full", notes = "" }
+openharmony = { level = "partial", notes = "isAvailable only; scan/write reject — tag discovery is app-level integration (background: ohos.nfc.tag.action.TAG_FOUND dispatch; foreground: tag readerMode)" }
 
 [build-dependencies]
 tauri-plugin = { workspace = true, features = ["build"] }

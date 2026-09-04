@@ -84,16 +84,17 @@ export class NfcPlugin extends Plugin {
   // ─── scan ───
 
   private handleScan(invoke: Invoke): void {
-    // NFC tag discovery on OHOS requires Ability-level intent handling
-    // (ACTION_TAG_DISCOVERED) which is outside the mobile plugin scope.
-    // The host app must implement foreground dispatch and feed the tag info.
-    invoke.reject('NFC scan is not supported from the plugin on OHOS: tag discovery requires Ability-level intent (ACTION_TAG_DISCOVERED) integration. See plugin design notes.');
+    // NFC tag discovery on OHOS is app-level integration, outside the mobile
+    // plugin scope: background dispatch declares "ohos.nfc.tag.action.TAG_FOUND"
+    // in module.json5 skills, foreground discovery uses tag readerMode with an
+    // ElementName. The host app must integrate one of these and feed the tag info.
+    invoke.reject('NFC scan is not supported from the plugin on OHOS: tag discovery is app-level integration (background: ohos.nfc.tag.action.TAG_FOUND dispatch in module.json5; foreground: tag readerMode). See plugin design notes.');
   }
 
   // ─── write ───
 
   private handleWrite(invoke: Invoke): void {
-    invoke.reject('NFC write is not supported from the plugin on OHOS: tag discovery requires Ability-level intent (ACTION_TAG_DISCOVERED) integration. See plugin design notes.');
+    invoke.reject('NFC write is not supported from the plugin on OHOS: tag discovery is app-level integration (background: ohos.nfc.tag.action.TAG_FOUND dispatch in module.json5; foreground: tag readerMode). See plugin design notes.');
   }
 }
 

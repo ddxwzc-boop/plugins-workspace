@@ -1,6 +1,6 @@
 [package]
 name = "tauri-plugin-haptics"
-description = "Haptic feedback and vibrations on Android and iOS"
+description = "Haptic feedback and vibrations on Android, iOS and OpenHarmony"
 version = "2.3.2"
 edition = { workspace = true }
 authors = { workspace = true }
@@ -17,6 +17,7 @@ linux = { level = "none", notes = "" }
 macos = { level = "none", notes = "" }
 android = { level = "full", notes = "" }
 ios = { level = "full", notes = "" }
+openharmony = { level = "full", notes = "vibrate is time-based; impact/notification/selection feedback use documented vibrator presets, with a time-based fallback on devices lacking a preset" }
 
 [build-dependencies]
 tauri-plugin = { workspace = true, features = ["build"] }
