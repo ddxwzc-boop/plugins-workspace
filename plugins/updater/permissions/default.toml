@@ -7,7 +7,9 @@ updater functions are exposed to the frontend.
 #### Granted Permissions
 
 The full workflow from checking for updates to installing them
-is enabled.
+is enabled. On OpenHarmony the AppGallery-specific commands
+(`checkAppGalleryUpdate` / `showAppGalleryUpdateDialog`) are also
+enabled; they only resolve on OHOS builds.
 
 """
 permissions = [
@@ -15,4 +17,6 @@ permissions = [
   "allow-download",
   "allow-install",
   "allow-download-and-install",
+  "allow-check-app-gallery-update",
+  "allow-show-app-gallery-update-dialog",
 ]

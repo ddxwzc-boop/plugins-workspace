@@ -2,7 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-const COMMANDS: &[&str] = &["check", "download", "install", "download_and_install"];
+// `check_app_gallery_update` / `show_app_gallery_update_dialog` are
+// OHOS-specific (AppGallery-backed); the ACL allows them globally — the
+// commands only resolve on OHOS builds, non-OHOS invokes fail with
+// "command not found" (same as any platform-specific command).
+const COMMANDS: &[&str] = &[
+    "check",
+    "download",
+    "install",
+    "download_and_install",
+    "check_app_gallery_update",
+    "show_app_gallery_update_dialog",
+];
 
 fn main() {
     tauri_plugin::Builder::new(COMMANDS)

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-check-app-gallery-update"
+description = "Enables the check_app_gallery_update command without any pre-configured scope."
+commands.allow = ["check_app_gallery_update"]
+
+[[permission]]
+identifier = "deny-check-app-gallery-update"
+description = "Denies the check_app_gallery_update command without any pre-configured scope."
+commands.deny = ["check_app_gallery_update"]
