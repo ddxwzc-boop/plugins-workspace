@@ -4,7 +4,6 @@
 
 use tauri::{AppHandle, Runtime};
 
-#[cfg(not(target_env = "ohos"))]
 #[tauri::command]
 pub fn restart<R: Runtime>(app: AppHandle<R>) {
     app.request_restart()

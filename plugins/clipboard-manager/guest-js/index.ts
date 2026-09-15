@@ -102,7 +102,10 @@ async function writeImage(
  * #### Platform-specific
  *
  * - **Android / iOS:** Not supported.
- * - **HarmonyOS (OHOS):** Not supported (READ_PASTEBOARD permission restriction).
+ * - **HarmonyOS (OHOS):** Supported. Reading the pasteboard requires the
+ *   `ohos.permission.READ_PASTEBOARD` user-grant permission (API 12+); the
+ *   plugin requests it on first read — when denied or undeclared the call
+ *   rejects as if the clipboard held no image.
  *
  * @example
  * ```typescript

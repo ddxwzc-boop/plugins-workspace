@@ -44,6 +44,16 @@ interface Options {
   body?: string
   /**
    * Schedule this notification to fire on a later time or a fixed interval.
+   *
+   * #### Platform-specific
+   *
+   * - **HarmonyOS (OHOS):** Scheduled notifications use the system
+   *   `reminderAgentManager` (background-proxy reminders), so they still fire
+   *   when the app is backgrounded or killed. Note that some schedules have
+   *   no system-reminder equivalent (every hour/minute/second, every N units,
+   *   twoWeeks) and all reminders are quota-managed — without the app's
+   *   agent-reminder entitlement from AGC the schedule falls back to a
+   *   foreground timer that only fires while the app is alive.
    */
   schedule?: Schedule
   /**

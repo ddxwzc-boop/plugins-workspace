@@ -159,9 +159,10 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
 #[cfg(target_env = "ohos")]
 /// Access to the clipboard APIs.
 ///
-/// On OHOS, `write_text`, `read_text`, and `write_image` are supported via
-/// the bridge plugin facade (`openharmony-ability-plugin-clipboard`).
-/// Other methods (`write_html`, `clear`, `read_image`) return `PlatformNotAvailable`.
+/// On OHOS, `write_text`, `read_text`, `write_image`, `read_image`,
+/// `write_html`, and `clear` are all supported via the bridge plugin facade
+/// (`openharmony-ability-plugin-clipboard`). Reads are subject to the
+/// API 12+ READ_PASTEBOARD gate (see ClipboardPlugin.ets).
 pub struct Clipboard<R: Runtime> {
     #[allow(dead_code)]
     app: AppHandle<R>,
@@ -275,12 +276,28 @@ impl<R: Runtime> Clipboard<R> {
         Ok(())
     }
 
-    /// Warning: This method should not be used on the main thread! Otherwise the underlying libraries may deadlock on Linux, freezing the whole app, when trying to copy data copied from this app, for example if the user copies text from the WebView.
-    // TODO: Add TSFN bridge for read_image on OHOS
-    pub fn read_image(&self) -> crate::Result<Image<'_>> {
-        Err(crate::Error::Clipboard(
-            "read_image not supported on OHOS (only write_image is available)".to_string(),
-        ))
+    // read_image on OHOS: bridge read-image action — the ArkTS side packs the
+    // pasteboard PixelMap as a base64 PNG, the plugin facade decodes it to
+    // RGBA. Async like write_image (commands.rs drives both from a worker
+    // thread); returns an owned Image (no arboard borrow on this path).
+    pub async fn read_image(&self) -> crate::Result<Image<'static>> {
+        use openharmony_ability_plugin_clipboard::ClipboardExt;
+
+        let client = tauri::ohos::APP
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|app| app.clone()))
+            .and_then(|app| app.clipboard().ok())
+            .ok_or_else(|| {
+                crate::Error::Clipboard(
+                    "Failed to create ClipboardClient: OHOS APP not initialized".to_string(),
+                )
+            })?;
+        let image = client
+            .read_image()
+            .await
+            .map_err(|e| crate::Error::Clipboard(e.to_string()))?;
+        Ok(Image::new_owned(image.rgba, image.width, image.height))
     }
 
     pub(crate) fn cleanup(&self) {

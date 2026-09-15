@@ -16,9 +16,12 @@ use crate::{
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum OpenResponse {
-    #[cfg(all(desktop, not(target_env = "ohos")))]
+    // Folder variants exist wherever folder picking does (issue
+    // Eulogizethesun/tauri#99): non-OHOS desktop + OHOS (DocumentViewPicker
+    // selectMode); matches the pick_folder/blocking_pick_folder cfg in lib.rs.
+    #[cfg(any(desktop, target_env = "ohos"))]
     Folders(Option<Vec<FilePath>>),
-    #[cfg(all(desktop, not(target_env = "ohos")))]
+    #[cfg(any(desktop, target_env = "ohos"))]
     Folder(Option<FilePath>),
     Files(Option<Vec<FilePath>>),
     File(Option<FilePath>),
@@ -183,7 +186,44 @@ pub(crate) async fn open<R: Runtime>(
                 OpenResponse::Folder(folder.map(|p| p.simplified()))
             }
         }
-        #[cfg(any(mobile, target_env = "ohos"))]
+        // OHOS: folder selection through the DocumentViewPicker bridge
+        // (Eulogizethesun/tauri#99). The ArkTS side maps `directory: true` to
+        // `DocumentSelectOptions.selectMode` — MIXED on 2in1 (the only mode that
+        // works there), FOLDER on Phone (API 26+; older versions fail with a
+        // clear error instead of a silent empty result).
+        #[cfg(target_env = "ohos")]
+        {
+            let tauri_scope = window.state::<tauri::scope::Scopes>();
+
+            if options.multiple {
+                let folders = dialog_builder.blocking_pick_folders();
+                if let Some(folders) = &folders {
+                    for folder in folders {
+                        if let Ok(path) = folder.clone().into_path() {
+                            if let Some(s) = window.try_fs_scope() {
+                                s.allow_directory(&path, options.recursive)?;
+                            }
+                            tauri_scope.allow_directory(&path, options.directory)?;
+                        }
+                    }
+                }
+                OpenResponse::Folders(
+                    folders.map(|folders| folders.into_iter().map(|p| p.simplified()).collect()),
+                )
+            } else {
+                let folder = dialog_builder.blocking_pick_folder();
+                if let Some(folder) = &folder {
+                    if let Ok(path) = folder.clone().into_path() {
+                        if let Some(s) = window.try_fs_scope() {
+                            s.allow_directory(&path, options.recursive)?;
+                        }
+                        tauri_scope.allow_directory(&path, options.directory)?;
+                    }
+                }
+                OpenResponse::Folder(folder.map(|p| p.simplified()))
+            }
+        }
+        #[cfg(all(mobile, not(target_env = "ohos")))]
         return Err(crate::Error::FolderPickerNotImplemented);
     } else if options.multiple {
         let tauri_scope = window.state::<tauri::scope::Scopes>();

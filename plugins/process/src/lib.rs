@@ -16,16 +16,10 @@ use tauri::{
 
 mod commands;
 
-#[cfg(target_env = "ohos")]
-mod ohos;
-
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("process")
         .invoke_handler(tauri::generate_handler![
             commands::exit,
-            #[cfg(target_env = "ohos")]
-            ohos::restart,
-            #[cfg(not(target_env = "ohos"))]
             commands::restart,
         ])
         .build()

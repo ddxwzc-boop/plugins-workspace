@@ -67,7 +67,7 @@ pub fn pick_file<R: Runtime, F: FnOnce(Option<FilePath>) + Send + 'static>(
         let res = dialog
             .dialog
             .0
-            .run_mobile_plugin::<FilePickerResponse>("showFilePicker", dialog.payload(false));
+            .run_mobile_plugin::<FilePickerResponse>("showFilePicker", dialog.payload(false, false));
         if let Ok(response) = res {
             f(Some(response.files.into_iter().next().unwrap()))
         } else {
@@ -84,7 +84,48 @@ pub fn pick_files<R: Runtime, F: FnOnce(Option<Vec<FilePath>>) + Send + 'static>
         let res = dialog
             .dialog
             .0
-            .run_mobile_plugin::<FilePickerResponse>("showFilePicker", dialog.payload(true));
+            .run_mobile_plugin::<FilePickerResponse>("showFilePicker", dialog.payload(true, false));
+        if let Ok(response) = res {
+            f(Some(response.files))
+        } else {
+            f(None)
+        }
+    });
+}
+
+// Folder picking on OHOS (Eulogizethesun/tauri#99): routed through the same
+// `showFilePicker` mobile-plugin command with `directory: true` — the ArkTS
+// DialogPlugin maps that to DocumentViewPicker selectMode (MIXED on 2in1,
+// FOLDER on Phone API 26+; older versions reject with a clear error).
+// Android/iOS keep no folder pickers, hence the ohos-only cfg.
+#[cfg(target_env = "ohos")]
+pub fn pick_folder<R: Runtime, F: FnOnce(Option<FilePath>) + Send + 'static>(
+    dialog: FileDialogBuilder<R>,
+    f: F,
+) {
+    std::thread::spawn(move || {
+        let res = dialog
+            .dialog
+            .0
+            .run_mobile_plugin::<FilePickerResponse>("showFilePicker", dialog.payload(false, true));
+        if let Ok(response) = res {
+            f(Some(response.files.into_iter().next().unwrap()))
+        } else {
+            f(None)
+        }
+    });
+}
+
+#[cfg(target_env = "ohos")]
+pub fn pick_folders<R: Runtime, F: FnOnce(Option<Vec<FilePath>>) + Send + 'static>(
+    dialog: FileDialogBuilder<R>,
+    f: F,
+) {
+    std::thread::spawn(move || {
+        let res = dialog
+            .dialog
+            .0
+            .run_mobile_plugin::<FilePickerResponse>("showFilePicker", dialog.payload(true, true));
         if let Ok(response) = res {
             f(Some(response.files))
         } else {
@@ -101,7 +142,7 @@ pub fn save_file<R: Runtime, F: FnOnce(Option<FilePath>) + Send + 'static>(
         let res = dialog
             .dialog
             .0
-            .run_mobile_plugin::<SaveFileResponse>("saveFileDialog", dialog.payload(false));
+            .run_mobile_plugin::<SaveFileResponse>("saveFileDialog", dialog.payload(false, false));
         if let Ok(response) = res {
             f(Some(response.file))
         } else {

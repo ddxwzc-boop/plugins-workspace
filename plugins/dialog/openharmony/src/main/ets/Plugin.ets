@@ -1,5 +1,6 @@
 import picker from '@ohos.file.picker';
 import promptAction from '@ohos.promptAction';
+import deviceInfo from '@ohos.deviceInfo';
 import { Plugin, Invoke } from '@tauri/app';
 
 interface FileFilter {
@@ -9,6 +10,7 @@ interface FileFilter {
 
 interface OpenArgs {
   multiple?: boolean;
+  directory?: boolean;
   filters?: FileFilter[];
   defaultPath?: string;
   title?: string;
@@ -44,7 +46,8 @@ export class DialogPlugin extends Plugin {
     console.info('[DialogPlugin] showFilePicker args: ' + argsStr);
     const args: OpenArgs = JSON.parse(argsStr) as OpenArgs;
     const multiple = args.multiple ?? false;
-    this.showDocumentPicker(invoke, multiple);
+    const directory = args.directory ?? false;
+    this.showDocumentPicker(invoke, multiple, directory);
   }
 
   private handleSave(invoke: Invoke): void {
@@ -77,13 +80,33 @@ export class DialogPlugin extends Plugin {
     this.showMessageBox(invoke, title, message, buttons);
   }
 
-  private async showDocumentPicker(invoke: Invoke, multiple: boolean): Promise<void> {
+  private async showDocumentPicker(invoke: Invoke, multiple: boolean, directory: boolean): Promise<void> {
     try {
-      console.info('[DialogPlugin] showDocumentPicker multiple=' + multiple);
+      console.info('[DialogPlugin] showDocumentPicker multiple=' + multiple + ' directory=' + directory);
       const documentPicker = new picker.DocumentViewPicker();
       const options: picker.DocumentSelectOptions = {
         maxSelectNumber: multiple ? 10 : 1
       };
+
+      // Folder selection (Eulogizethesun/tauri#99): DocumentViewPicker has no
+      // dedicated folder mode — selectMode decides what can be picked.
+      // - 2in1 (PC): MIXED is the only mode that works there (files and
+      //   folders mixed; per official docs MIXED has no effect on other
+      //   devices).
+      // - Phone: FOLDER requires API 26+; older versions get an explicit
+      //   error instead of a silent empty result.
+      if (directory) {
+        if (deviceInfo.deviceType === '2in1') {
+          options.selectMode = picker.DocumentSelectMode.MIXED;
+        } else {
+          if (deviceInfo.sdkApiVersion < 26) {
+            console.error('[DialogPlugin] folder picking requires API 26+ on non-2in1 devices, current ' + deviceInfo.sdkApiVersion);
+            invoke.reject('Folder picking is not supported on this device (FOLDER selectMode requires API 26+, current ' + deviceInfo.sdkApiVersion + ')');
+            return;
+          }
+          options.selectMode = picker.DocumentSelectMode.FOLDER;
+        }
+      }
 
       const result = await documentPicker.select(options);
       console.info('[DialogPlugin] documentPicker result: ' + JSON.stringify(result));

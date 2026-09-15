@@ -86,10 +86,25 @@ pub(crate) async fn read_image<R: Runtime>(
     webview: Webview<R>,
     clipboard: State<'_, Clipboard<R>>,
 ) -> Result<ResourceId> {
-    let image = clipboard.read_image()?.to_owned();
-    let mut resources_table = webview.resources_table();
-    let rid = resources_table.add(image);
-    Ok(rid)
+    // On OHOS, read_image is an async bridge round-trip (PixelMap → base64
+    // PNG → RGBA in the plugin facade). The ResourceTable MutexGuard is
+    // !Send and cannot cross .await — the bridge resolves first, then the
+    // owned image is inserted (same shape as write_image above).
+    #[cfg(target_env = "ohos")]
+    {
+        let image = clipboard.read_image().await?;
+        let mut resources_table = webview.resources_table();
+        let rid = resources_table.add(image);
+        return Ok(rid);
+    }
+    // Desktop (arboard): sync read, borrowed image owned via to_owned().
+    #[cfg(not(target_env = "ohos"))]
+    {
+        let image = clipboard.read_image()?.to_owned();
+        let mut resources_table = webview.resources_table();
+        let rid = resources_table.add(image);
+        Ok(rid)
+    }
 }
 
 #[command]

@@ -1,4 +1,5 @@
 import { notificationManager } from '@kit.NotificationKit';
+import { reminderAgentManager } from '@kit.BackgroundTasksKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { wantAgent } from '@kit.AbilityKit';
 import { Plugin, Invoke } from '@tauri/app';
@@ -97,7 +98,10 @@ interface PendingEntry {
   title: string;
   body: string;
   schedule: object;
-  timerId: number;
+  // Foreground-timer entries (fallback path): the setTimeout/setInterval id.
+  timerId?: number;
+  // reminderAgentManager entries (primary path): the system reminder id.
+  reminderId?: number;
 }
 
 interface PendingNotification {
@@ -232,7 +236,8 @@ export class NotificationPlugin extends Plugin {
       const args: NotificationData = JSON.parse(invoke.parseArgs()) as NotificationData;
       const id = args.id ?? 0;
 
-      // If a schedule is present, defer to the foreground timer
+      // If a schedule is present, defer to the scheduling path (system
+      // reminderAgentManager proxy with foreground-timer fallback, #114)
       if (args.schedule != null) {
         this.scheduleNotification(id, args, invoke);
         return;
@@ -337,19 +342,293 @@ export class NotificationPlugin extends Plugin {
     return buttons;
   }
 
-  // ─── scheduling (foreground timers) ───
+  // ─── scheduling (background reminders + foreground timer fallback) ───
 
   /**
-   * Schedules a notification using foreground setTimeout/setInterval.
+   * Schedules a notification (issue Eulogizethesun/tauri#114).
    *
-   * Limitations:
-   * - Only works while the app is in the foreground (timers are cleared on exit)
-   * - For background scheduling, use reminderAgentManager.publishReminder (not implemented)
-   * - Repeating schedules use setInterval with the initial delay as the repeat period
+   * Primary path: reminderAgentManager.publishReminder — the system proxies
+   * the reminder when the app is backgrounded or killed, which is what
+   * alarm/calendar use cases need. Schedule → reminder mapping:
+   *   at (one-shot)  → ReminderRequestTimer (countdown)
+   *   at (repeating) → ReminderRequestCalendar repeating monthly on that
+   *                    day/time (approximation; Android repeats with the
+   *                    initial delay as period — also an approximation)
+   *   interval       → ReminderRequestCalendar at the next field match with
+   *                    repeat rules from the matched fields (DateMatch
+   *                    semantics, matching Android; month+day → yearly,
+   *                    day → monthly, weekday → weekly, time-only → daily)
+   *   every (day/week/month/year, count=1) → Calendar anchored at now+1 unit
+   *   every (hour/minute/second/twoWeeks, or count>1) → not expressible (the
+   *                    system has no arbitrary-period repeats)
+   *
+   * Fallback: publishReminder is 管控 on some devices — normal apps without
+   * the AGC agent-reminder entitlement get a reminder quota of 0 (error
+   * 1700002), and it fails with 1700001 when notifications are disabled. Any
+   * failure, or a non-expressible schedule, degrades to the historical
+   * foreground setTimeout/setInterval behavior (fires only while the app is
+   * alive; timers are cleared on exit).
+   *
+   * Reminder datetime conventions (official API reference, do not mix up):
+   *   LocalDateTime.month / repeatMonths: [1, 12]; repeatDays: [1, 31];
+   *   daysOfWeek: Monday=1 .. Sunday=7 (tauri's interval.weekday is
+   *   1=Sunday..7=Saturday — converted below).
    */
   private scheduleNotification(id: number, args: NotificationData, invoke: Invoke): void {
     try {
       const schedule = args.schedule as ScheduleWrapper;
+      const reminder = this.buildReminderRequest(id, args, schedule);
+      if (reminder != null) {
+        this.publishReminderWithFallback(id, args, reminder, invoke);
+        return;
+      }
+      this.scheduleViaForegroundTimer(id, args, schedule, invoke);
+    } catch (e) {
+      const err = e as BusinessError;
+      console.error('[NotificationPlugin] schedule failed: ' + err.message);
+      invoke.reject('Schedule failed: ' + err.message);
+    }
+  }
+
+  /** Publishes a system reminder; any failure falls back to a foreground timer. */
+  private async publishReminderWithFallback(
+    id: number,
+    args: NotificationData,
+    reminder: reminderAgentManager.ReminderRequest,
+    invoke: Invoke
+  ): Promise<void> {
+    try {
+      const reminderId = await reminderAgentManager.publishReminder(reminder);
+      this.pendingMap.set(id, {
+        id: id,
+        title: args.title ?? '',
+        body: args.body ?? '',
+        schedule: args.schedule as object,
+        reminderId: reminderId
+      });
+      console.info('[NotificationPlugin] scheduled via reminderAgentManager: notificationId=' + id + ' reminderId=' + reminderId);
+      invoke.resolve(JSON.stringify(id));
+    } catch (e) {
+      const err = e as BusinessError;
+      // 201 (PUBLISH_AGENT_REMINDER missing) / 1700001 (notification
+      // disabled) / 1700002 (quota exceeded — the 管控 no-entitlement case)
+      // → degrade to the foreground timer path.
+      console.warn('[NotificationPlugin] publishReminder failed (code=' + err.code + '): ' + err.message + ' — falling back to foreground timer');
+      this.scheduleViaForegroundTimer(id, args, args.schedule as ScheduleWrapper, invoke);
+    }
+  }
+
+  /**
+   * Builds a ReminderRequest from a schedule, or null when the schedule is
+   * invalid / not expressible as a system reminder (the caller then falls
+   * back to a foreground timer, which also produces the legacy error message
+   * for invalid dates).
+   */
+  private buildReminderRequest(
+    id: number,
+    args: NotificationData,
+    schedule: ScheduleWrapper
+  ): reminderAgentManager.ReminderRequest | null {
+    const title = args.title ?? '';
+    const body = args.body ?? '';
+    const slotType = this.slotTypeFor(args);
+
+    if (schedule.at != null) {
+      const timestamp = Date.parse(schedule.at.date);
+      if (isNaN(timestamp)) {
+        return null;
+      }
+      if (!schedule.at.repeating) {
+        const seconds = Math.ceil((timestamp - Date.now()) / 1000);
+        if (seconds < 1) {
+          return null; // due now/overdue → immediate publish via the timer path (delay 0)
+        }
+        const timer: reminderAgentManager.ReminderRequestTimer = {
+          reminderType: reminderAgentManager.ReminderType.REMINDER_TYPE_TIMER,
+          triggerTimeInSeconds: seconds,
+          title: title,
+          content: body,
+          notificationId: id,
+          slotType: slotType
+        };
+        return timer;
+      }
+      if (timestamp <= Date.now()) {
+        return null; // repeating at a past date — keep the legacy clamp behavior
+      }
+      const dt = new Date(timestamp);
+      const calendar: reminderAgentManager.ReminderRequestCalendar = {
+        reminderType: reminderAgentManager.ReminderType.REMINDER_TYPE_CALENDAR,
+        dateTime: this.toLocalDateTime(dt),
+        repeatMonths: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        repeatDays: [dt.getDate()],
+        title: title,
+        content: body,
+        notificationId: id,
+        slotType: slotType
+      };
+      return calendar;
+    }
+
+    if (schedule.interval != null) {
+      const fields = schedule.interval.interval;
+      const next = this.nextDateMatch(fields);
+      if (next == null) {
+        return null;
+      }
+      const calendar: reminderAgentManager.ReminderRequestCalendar = {
+        reminderType: reminderAgentManager.ReminderType.REMINDER_TYPE_CALENDAR,
+        dateTime: this.toLocalDateTime(next),
+        title: title,
+        content: body,
+        notificationId: id,
+        slotType: slotType
+      };
+      if (fields.year == null) {
+        if (fields.month != null && fields.day != null) {
+          // yearly on that month/day
+          calendar.repeatMonths = [fields.month];
+          calendar.repeatDays = [fields.day];
+        } else if (fields.day != null && fields.weekday == null) {
+          // monthly on that day of month (repeatMonths required with repeatDays)
+          calendar.repeatMonths = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+          calendar.repeatDays = [fields.day];
+        } else if (fields.weekday != null) {
+          // weekly on that weekday (tauri 1=Sun..7=Sat → OHOS Mon=1..Sun=7)
+          calendar.daysOfWeek = [fields.weekday === 1 ? 7 : fields.weekday - 1];
+        } else {
+          // time-of-day only → daily
+          calendar.daysOfWeek = [1, 2, 3, 4, 5, 6, 7];
+        }
+      }
+      // year set → one-shot at that specific date
+      return calendar;
+    }
+
+    if (schedule.every != null) {
+      const unit = schedule.every.interval;
+      const count = schedule.every.count > 0 ? schedule.every.count : 1;
+      // The reminder system only supports calendar-rule repeats; arbitrary
+      // N-unit periods and sub-day units have no equivalent.
+      if (count !== 1 || unit === 'hour' || unit === 'minute' || unit === 'second' || unit === 'twoWeeks') {
+        return null;
+      }
+      const anchor = new Date();
+      let daysOfWeek: number[] | undefined = undefined;
+      let repeatMonths: number[] | undefined = undefined;
+      let repeatDays: number[] | undefined = undefined;
+      switch (unit) {
+        case 'day':
+          anchor.setDate(anchor.getDate() + 1);
+          daysOfWeek = [1, 2, 3, 4, 5, 6, 7];
+          break;
+        case 'week':
+          anchor.setDate(anchor.getDate() + 7);
+          // JS getDay 0=Sun..6=Sat → OHOS Mon=1..Sun=7
+          daysOfWeek = [anchor.getDay() === 0 ? 7 : anchor.getDay()];
+          break;
+        case 'month':
+          anchor.setMonth(anchor.getMonth() + 1);
+          repeatMonths = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+          repeatDays = [anchor.getDate()];
+          break;
+        case 'year':
+          anchor.setFullYear(anchor.getFullYear() + 1);
+          repeatMonths = [anchor.getMonth() + 1];
+          repeatDays = [anchor.getDate()];
+          break;
+        default:
+          return null;
+      }
+      const calendar: reminderAgentManager.ReminderRequestCalendar = {
+        reminderType: reminderAgentManager.ReminderType.REMINDER_TYPE_CALENDAR,
+        dateTime: this.toLocalDateTime(anchor),
+        title: title,
+        content: body,
+        notificationId: id,
+        slotType: slotType,
+        daysOfWeek: daysOfWeek,
+        repeatMonths: repeatMonths,
+        repeatDays: repeatDays
+      };
+      return calendar;
+    }
+
+    return null;
+  }
+
+  /** Resolves the notification SlotType for a payload (channel map → importance default). */
+  private slotTypeFor(args: NotificationData): notificationManager.SlotType {
+    if (args.channelId != null) {
+      const channelConfig = this.channelMap.get(args.channelId);
+      if (channelConfig != null) {
+        return channelConfig.slotType;
+      }
+    }
+    return importanceToSlotType(undefined);
+  }
+
+  /** Converts a Date to a reminder LocalDateTime (months are 1-based, unlike JS Date). */
+  private toLocalDateTime(dt: Date): reminderAgentManager.LocalDateTime {
+    return {
+      year: dt.getFullYear(),
+      month: dt.getMonth() + 1,
+      day: dt.getDate(),
+      hour: dt.getHours(),
+      minute: dt.getMinutes(),
+      second: dt.getSeconds()
+    };
+  }
+
+  /**
+   * Finds the next time matching the set DateMatch fields (Android DateMatch
+   * semantics: every set field must equal the value, unset fields are
+   * wildcards). Day-by-day forward search bounded to ~4 years (covers Feb-29
+   * anchors); returns null when nothing matches in that window.
+   */
+  private nextDateMatch(fields: ScheduleIntervalFields): Date | null {
+    const anySet = fields.year != null || fields.month != null || fields.day != null
+      || fields.weekday != null || fields.hour != null || fields.minute != null || fields.second != null;
+    if (!anySet) {
+      return null;
+    }
+    // tauri weekday is 1=Sunday..7=Saturday; JS Date.getDay() is 0=Sunday..6=Saturday
+    const wantedWeekday = fields.weekday != null ? fields.weekday - 1 : -1;
+    const start = new Date();
+    for (let dayOffset = 0; dayOffset <= 1460; dayOffset++) {
+      const candidate = new Date(
+        start.getFullYear(), start.getMonth(), start.getDate() + dayOffset,
+        fields.hour ?? 0, fields.minute ?? 0, fields.second ?? 0, 0
+      );
+      if (fields.year != null && candidate.getFullYear() !== fields.year) {
+        continue;
+      }
+      if (fields.month != null && candidate.getMonth() + 1 !== fields.month) {
+        continue;
+      }
+      if (fields.day != null && candidate.getDate() !== fields.day) {
+        continue;
+      }
+      if (wantedWeekday >= 0 && candidate.getDay() !== wantedWeekday) {
+        continue;
+      }
+      if (candidate.getTime() <= Date.now()) {
+        continue;
+      }
+      return candidate;
+    }
+    return null;
+  }
+
+  /**
+   * Legacy scheduling path: foreground setTimeout/setInterval.
+   *
+   * Limitations (why this is only the fallback since #114):
+   * - Only works while the app is in the foreground (timers are cleared on exit)
+   * - Repeating schedules use setInterval with the initial delay as the repeat period
+   */
+  private scheduleViaForegroundTimer(id: number, args: NotificationData, schedule: ScheduleWrapper, invoke: Invoke): void {
+    try {
       const title = args.title ?? '';
       const body = args.body ?? '';
 
@@ -541,8 +820,15 @@ export class NotificationPlugin extends Plugin {
       const argsStr = invoke.parseArgs();
 
       if (argsStr === '' || argsStr === 'null' || argsStr === '{}') {
-        // cancelAll: clear all pending timers + system notifications
+        // cancelAll: clear all pending timers/reminders + system notifications
         this.clearAllPending();
+        try {
+          await reminderAgentManager.cancelAllReminders();
+        } catch (reminderErr) {
+          // Tolerated: nothing published, or the reminder service is
+          // unavailable — notification cancelAll below still runs.
+          console.warn('[NotificationPlugin] cancelAllReminders failed: ' + (reminderErr as BusinessError).message);
+        }
         await notificationManager.cancelAll();
         invoke.resolve('');
         return;
@@ -574,11 +860,20 @@ export class NotificationPlugin extends Plugin {
     }
   }
 
-  /** Clears a single pending timer by notification ID. */
+  /** Clears a single pending entry (foreground timer and/or system reminder) by notification ID. */
   private clearPending(id: number): void {
     const entry = this.pendingMap.get(id);
     if (entry != null) {
-      clearTimeout(entry.timerId);
+      if (entry.timerId != null) {
+        clearTimeout(entry.timerId);
+      }
+      if (entry.reminderId != null) {
+        // Fire-and-forget; 1700003 (already fired/removed) is tolerated.
+        const reminderId = entry.reminderId;
+        reminderAgentManager.cancelReminder(reminderId).catch((e: BusinessError) => {
+          console.warn('[NotificationPlugin] cancelReminder(' + reminderId + ') failed: ' + e.message);
+        });
+      }
       this.pendingMap.delete(id);
     }
   }
