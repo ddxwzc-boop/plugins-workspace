@@ -136,3 +136,15 @@ export async function requestPermissions(
     permissions
   })
 }
+
+/**
+ * Opens the system location settings page so the user can enable the
+ * location master switch and grant app location permissions.
+ *
+ * OpenHarmony only; other platforms reject with a command not found or ACL error.
+ *
+ * @since 2.4.0
+ */
+export async function openLocationSettings(): Promise<void> {
+  await invoke('plugin:geolocation|open_location_settings')
+}

@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
-// `check_app_gallery_update` / `show_app_gallery_update_dialog` are
-// OHOS-specific (AppGallery-backed); the ACL allows them globally — the
-// commands only resolve on OHOS builds, non-OHOS invokes fail with
-// "command not found" (same as any platform-specific command).
+// Note: `check_app_gallery_update` and `show_app_gallery_update_dialog` are not
+// part of the upstream (v2) command surface, but they are the only updater
+// commands registered on OpenHarmony, where updates are hosted by AppGallery -
+// the desktop commands (`check`/`download`/`install`/`download_and_install`)
+// are not available on that platform.
 const COMMANDS: &[&str] = &[
     "check",
     "download",
@@ -20,24 +21,5 @@ fn main() {
         .global_api_script_path("./api-iife.js")
         .build();
 
-    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
-    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
-    let mobile = if target_env == "ohos" {
-        println!("cargo:rerun-if-env-changed=OHOS_DEVICE_TYPE");
-        let device_type = std::env::var("OHOS_DEVICE_TYPE").unwrap_or_else(|_| "mobile".to_string());
-        device_type != "desktop"
-    } else {
-        target_os == "ios" || target_os == "android"
-    };
-    alias("desktop", !mobile);
-    alias("mobile", mobile);
-}
-
-// creates a cfg alias if `has_feature` is true.
-// `alias` must be a snake case string.
-fn alias(alias: &str, has_feature: bool) {
-    println!("cargo:rustc-check-cfg=cfg({alias})");
-    if has_feature {
-        println!("cargo:rustc-cfg={alias}");
-    }
+    tauri_plugin::cfg_aliases();
 }

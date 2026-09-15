@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-License-Identifier: MIT
 
+// `remove_listener` fixes an upstream ACL bug: the v2 JS
+// `PluginListener.unregister()` invokes this command, but v2 never declared
+// it, so `unregister()` is rejected by the ACL on every platform.
 const COMMANDS: &[&str] = &[
     "notify",
     "request_permission",

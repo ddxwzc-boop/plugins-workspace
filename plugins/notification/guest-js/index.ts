@@ -567,6 +567,9 @@ async function removeChannel(id: string): Promise<void> {
  * @since 2.0.0
  */
 async function channels(): Promise<Channel[]> {
+  // `list_channels` (not v2's `listChannels`) matches the snake_case used by
+  // every other command of this plugin; on Android/iOS the mobile fallback
+  // converts it back to camelCase, and desktop never supported channels.
   return await invoke('plugin:notification|list_channels')
 }
 

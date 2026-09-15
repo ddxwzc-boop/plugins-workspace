@@ -604,10 +604,8 @@ impl<R: Runtime> Store<R> {
         #[cfg(target_env = "ohos")]
         {
             match self.store.try_lock() {
-                Ok(mut guard) => {
-                    if let Some(sender) =
-                        self.auto_save_debounce_sender.lock().unwrap().take()
-                    {
+                Ok(guard) => {
+                    if let Some(sender) = self.auto_save_debounce_sender.lock().unwrap().take() {
                         let _ = sender.send(AutoSaveMessage::Cancel);
                     }
                     guard.save()

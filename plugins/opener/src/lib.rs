@@ -29,6 +29,17 @@ type Result<T> = std::result::Result<T, Error>;
 pub use open::{open_path, open_url};
 pub use reveal_item_in_dir::{reveal_item_in_dir, reveal_items_in_dir};
 
+/// Clones the global OpenHarmony app handle set by the tauri runtime,
+/// or fails when the plugin is used before the app is initialized.
+#[cfg(target_env = "ohos")]
+pub(crate) fn ohos_app() -> crate::Result<tauri::ohos::openharmony_ability::OpenHarmonyApp> {
+    tauri::ohos::APP
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().cloned())
+        .ok_or_else(|| crate::Error::OpenharmonyAbility("OHOS APP not initialized".to_string()))
+}
+
 pub struct Opener<R: Runtime> {
     // we use `fn() -> R` to silence the unused generic error
     // while keeping this struct `Send + Sync` without requiring `R` to be
@@ -69,11 +80,7 @@ impl<R: Runtime> Opener<R> {
     /// OHOS: async — routed through the openharmony-ability bridge.
     #[cfg(target_env = "ohos")]
     pub async fn open_url(&self, url: impl Into<String>, with: Option<impl Into<String>>) -> Result<()> {
-        crate::open::open_url(
-            url.into(),
-            with.map(Into::into).filter(|with| with != "inAppBrowser"),
-        )
-        .await
+        crate::open::open_url(url.into(), with.map(Into::into)).await
     }
 
     /// Open a url with a default or specific program.
@@ -141,11 +148,7 @@ impl<R: Runtime> Opener<R> {
         path: impl Into<String>,
         with: Option<impl Into<String>>,
     ) -> Result<()> {
-        crate::open::open_path(
-            path.into(),
-            with.map(Into::into).filter(|with| with != "inAppBrowser"),
-        )
-        .await
+        crate::open::open_path(path.into(), with.map(Into::into)).await
     }
 
     /// Open a path with a default or specific program.

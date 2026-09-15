@@ -17,6 +17,7 @@ linux = { level = "full", notes = "" }
 macos = { level = "full", notes = "" }
 android = { level = "partial", notes = "Only allows to open URLs via `open`" }
 ios = { level = "partial", notes = "Only allows to open URLs via `open`" }
+openharmony = { level = "partial", notes = "Opens URLs/paths with the system default application only (`with`/`inAppBrowser` unsupported); reveal shows the first item's parent in the file manager." }
 
 
 [build-dependencies]
@@ -29,7 +30,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { workspace = true }
 thiserror = { workspace = true }
-open = { version = "5", features = ["shellexecute-on-windows"] }
 glob = { workspace = true }
 dunce = { workspace = true }
 
@@ -60,6 +60,9 @@ features = ["std", "NSURL", "NSArray", "NSString"]
 
 [target.'cfg(target_os = "ios")'.dependencies]
 tauri = { workspace = true, features = ["wry"] }
+
+[target.'cfg(not(target_env = "ohos"))'.dependencies]
+open = { version = "5", features = ["shellexecute-on-windows"] }
 
 [target.'cfg(target_env = "ohos")'.dependencies]
 openharmony-ability-plugin-url = { path = "../../../openharmony-ability/crates/plugin-url" }

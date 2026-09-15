@@ -7,25 +7,22 @@ use tauri::{command, image::JsImage, AppHandle, Manager, ResourceId, Runtime, St
 use crate::{Clipboard, Result};
 
 #[command]
-#[cfg(all(desktop, not(target_env = "ohos")))]
+#[cfg(any(desktop, target_env = "ohos"))]
 pub(crate) async fn write_text<R: Runtime>(
     _app: AppHandle<R>,
     clipboard: State<'_, Clipboard<R>>,
     text: &str,
     #[allow(unused)] label: Option<String>,
 ) -> Result<()> {
-    clipboard.write_text(text)
-}
-
-#[command]
-#[cfg(target_env = "ohos")]
-pub(crate) async fn write_text<R: Runtime>(
-    _app: AppHandle<R>,
-    clipboard: State<'_, Clipboard<R>>,
-    text: &str,
-    #[allow(unused)] label: Option<String>,
-) -> Result<()> {
-    clipboard.write_text(text)
+    // OHOS Clipboard methods are async (bridge calls); desktop is sync.
+    #[cfg(target_env = "ohos")]
+    {
+        clipboard.write_text(text).await
+    }
+    #[cfg(not(target_env = "ohos"))]
+    {
+        clipboard.write_text(text)
+    }
 }
 
 #[command]
@@ -47,7 +44,15 @@ pub(crate) async fn read_text<R: Runtime>(
     _app: AppHandle<R>,
     clipboard: State<'_, Clipboard<R>>,
 ) -> Result<String> {
-    clipboard.read_text()
+    // OHOS: async bridge call; desktop/mobile: sync.
+    #[cfg(target_env = "ohos")]
+    {
+        clipboard.read_text().await
+    }
+    #[cfg(not(target_env = "ohos"))]
+    {
+        clipboard.read_text()
+    }
 }
 
 #[command]
@@ -114,7 +119,15 @@ pub(crate) async fn write_html<R: Runtime>(
     html: &str,
     alt_text: Option<&str>,
 ) -> Result<()> {
-    clipboard.write_html(html, alt_text)
+    // OHOS: async bridge call; desktop/mobile: sync.
+    #[cfg(target_env = "ohos")]
+    {
+        clipboard.write_html(html, alt_text).await
+    }
+    #[cfg(not(target_env = "ohos"))]
+    {
+        clipboard.write_html(html, alt_text)
+    }
 }
 
 #[command]
@@ -122,5 +135,13 @@ pub(crate) async fn clear<R: Runtime>(
     _app: AppHandle<R>,
     clipboard: State<'_, Clipboard<R>>,
 ) -> Result<()> {
-    clipboard.clear()
+    // OHOS: async bridge call; desktop/mobile: sync.
+    #[cfg(target_env = "ohos")]
+    {
+        clipboard.clear().await
+    }
+    #[cfg(not(target_env = "ohos"))]
+    {
+        clipboard.clear()
+    }
 }

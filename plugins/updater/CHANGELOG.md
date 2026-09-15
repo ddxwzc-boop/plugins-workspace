@@ -2,7 +2,7 @@
 
 ## \[Unreleased]
 
-- Added OpenHarmony (OHOS) backend. `check()` queries AppGallery `updateManager.checkAppUpdate()` (pure metadata, no dialog). `downloadAndInstall()` triggers the system `showUpdateDialog()`. `download()` and `install()` return `UnsupportedPlatform`. Requires `ohos.permission.GET_BUNDLE_INFO` in `module.json5`.
+- Added OpenHarmony (OHOS) support through two dedicated APIs: `checkAppGalleryUpdate()` queries the AppGallery `updateManager.checkAppUpdate()` (pure metadata, no dialog), and `showAppGalleryUpdateDialog()` opens the system `showUpdateDialog()` (user-driven, so the promise resolving does not mean the update was installed). The desktop updater APIs (`check`, `Update.download`, `Update.install`, `Update.downloadAndInstall`) are not available on OpenHarmony.
 
 ## \[2.10.1]
 

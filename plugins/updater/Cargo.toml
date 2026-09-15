@@ -19,6 +19,7 @@ linux = { level = "full", notes = "" }
 macos = { level = "full", notes = "" }
 android = { level = "none", notes = "" }
 ios = { level = "none", notes = "" }
+openharmony = { level = "partial", notes = "AppGallery update check + system update dialog only (checkAppGalleryUpdate/showAppGalleryUpdateDialog); the desktop updater API is not available" }
 
 [build-dependencies]
 tauri-plugin = { workspace = true, features = ["build"] }

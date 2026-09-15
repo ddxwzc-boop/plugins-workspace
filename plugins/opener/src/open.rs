@@ -48,11 +48,7 @@ pub async fn open_url<P: AsRef<str>, S: AsRef<str>>(url: P, with: Option<S>) -> 
 
     let _ = with;
     let url = url.as_ref();
-    let ohos_app = tauri::ohos::APP
-        .lock()
-        .ok()
-        .and_then(|g| g.as_ref().cloned())
-        .ok_or_else(|| crate::Error::OpenharmonyAbility("OHOS APP not initialized".to_string()))?;
+    let ohos_app = crate::ohos_app()?;
     ohos_app
         .open_url(url.to_string())
         .await
@@ -100,11 +96,7 @@ pub async fn open_path<P: AsRef<Path>, S: AsRef<str>>(path: P, with: Option<S>) 
     let canon = std::fs::canonicalize(path.as_ref())?;
     let uri = url::Url::from_file_path(&canon)
         .map_err(|_| crate::Error::InvalidPath(path.as_ref().to_string_lossy().to_string()))?;
-    let ohos_app = tauri::ohos::APP
-        .lock()
-        .ok()
-        .and_then(|g| g.as_ref().cloned())
-        .ok_or_else(|| crate::Error::OpenharmonyAbility("OHOS APP not initialized".to_string()))?;
+    let ohos_app = crate::ohos_app()?;
     ohos_app
         .open_url(uri.to_string())
         .await

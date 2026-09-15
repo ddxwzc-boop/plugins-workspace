@@ -140,13 +140,7 @@ mod imp {
             // Sandbox/unmappable-prefix detection is done ArkTS-side (it owns
             // OHOS sandbox layout knowledge) and surfaces as a documented error.
             use openharmony_ability_plugin_url::UrlExt;
-            let ohos_app = tauri::ohos::APP
-                .lock()
-                .ok()
-                .and_then(|g| g.as_ref().cloned())
-                .ok_or_else(|| {
-                    crate::Error::OpenharmonyAbility("OHOS APP not initialized".to_string())
-                })?;
+            let ohos_app = crate::ohos_app()?;
             ohos_app
                 .reveal_in_dir(parent.to_string_lossy().to_string())
                 .await

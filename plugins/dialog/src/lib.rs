@@ -195,16 +195,12 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
         builder = builder.js_init_script(include_str!("init-iife.js").to_string());
     }
 
-    #[cfg(not(target_os = "android"))]
-    {
-        builder = builder.invoke_handler(tauri::generate_handler![
+    builder
+        .invoke_handler(tauri::generate_handler![
             commands::open,
             commands::save,
             commands::message,
-        ]);
-    }
-
-    builder
+        ])
         .setup(|app, api| {
             #[cfg(any(mobile, target_env = "ohos"))]
             let dialog = mobile::init(app, api)?;

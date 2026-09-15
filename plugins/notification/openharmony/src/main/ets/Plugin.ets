@@ -362,7 +362,7 @@ export class NotificationPlugin extends Plugin {
    *   every (hour/minute/second/twoWeeks, or count>1) → not expressible (the
    *                    system has no arbitrary-period repeats)
    *
-   * Fallback: publishReminder is 管控 on some devices — normal apps without
+   * Fallback: publishReminder is entitlement-gated on some devices — normal apps without
    * the AGC agent-reminder entitlement get a reminder quota of 0 (error
    * 1700002), and it fails with 1700001 when notifications are disabled. Any
    * failure, or a non-expressible schedule, degrades to the historical
@@ -411,7 +411,7 @@ export class NotificationPlugin extends Plugin {
     } catch (e) {
       const err = e as BusinessError;
       // 201 (PUBLISH_AGENT_REMINDER missing) / 1700001 (notification
-      // disabled) / 1700002 (quota exceeded — the 管控 no-entitlement case)
+      // disabled) / 1700002 (quota exceeded — the no-entitlement case)
       // → degrade to the foreground timer path.
       console.warn('[NotificationPlugin] publishReminder failed (code=' + err.code + '): ' + err.message + ' — falling back to foreground timer');
       this.scheduleViaForegroundTimer(id, args, args.schedule as ScheduleWrapper, invoke);

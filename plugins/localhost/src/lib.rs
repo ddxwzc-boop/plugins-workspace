@@ -81,6 +81,7 @@ impl Builder {
                 let asset_resolver = app.asset_resolver();
 
                 std::thread::spawn(move || {
+                    // OHOS: only the loopback address can be bound/listened on; external listening is restricted.
                     #[cfg(target_env = "ohos")]
                     let bind_addr = format!("127.0.0.1:{}", port);
                     #[cfg(not(target_env = "ohos"))]

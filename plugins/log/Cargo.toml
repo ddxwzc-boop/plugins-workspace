@@ -15,6 +15,7 @@ linux = { level = "full", notes = "" }
 macos = { level = "full", notes = "" }
 android = { level = "full", notes = "" }
 ios = { level = "full", notes = "" }
+openharmony = { level = "full", notes = "Desktop target set (stdout/stderr, rotating files, log dir) inside the app sandbox" }
 
 [build-dependencies]
 tauri-plugin = { workspace = true, features = ["build"] }
@@ -46,6 +47,9 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
   "std",
   "NSString",
 ] }
+
+[target."cfg(target_env = \"ohos\")".dependencies]
+hilog = "0.2"
 
 [features]
 colored = ["fern/colored"]

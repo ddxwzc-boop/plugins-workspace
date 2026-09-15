@@ -15,6 +15,7 @@ linux = { level = "full", notes = "" }
 macos = { level = "full", notes = "" }
 android = { level = "none", notes = "" }
 ios = { level = "none", notes = "" }
+openharmony = { level = "partial", notes = "Saves/restores position, size and visibility; maximize/fullscreen/decorations are no-ops on restore (no window-management meaning on phone/tablet form factors); no auto-save on exit (explicit save_window_state only)" }
 
 [build-dependencies]
 tauri-plugin = { workspace = true, features = ["build"] }

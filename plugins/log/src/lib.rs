@@ -344,6 +344,17 @@ pub enum TargetKind {
     /// | Windows   | `{FOLDERID_LocalAppData}/{bundleIdentifier}/logs`                                         | `C:\Users\Alice\AppData\Local\com.tauri.dev\logs`           |
     /// | Android   | `{ConfigDir}/logs`                                                                        | `/data/data/com.tauri.dev/files/logs`                       |
     LogDir { file_name: Option<String> },
+    /// Forward logs to the OpenHarmony hilog system log.
+    ///
+    /// ### Platform-specific
+    ///
+    /// - **OHOS**: writes logs through the hilog NDK API using the given `tag`
+    ///   (max 31 bytes, truncated by hilog if longer). The logger is created
+    ///   per-target and does not install the global `log` logger — the plugin's
+    ///   own dispatch stays the single global logger.
+    /// - **Other platforms**: this variant does not exist (compile-time cfg).
+    #[cfg(target_env = "ohos")]
+    Hilog { tag: String },
     /// Forward logs to the webview (via the `log://log` event).
     ///
     /// This requires the webview to subscribe to log events, via this plugins `attachConsole` function.
@@ -610,6 +621,20 @@ impl Builder {
                 TargetKind::Stdout => std::io::stdout().into(),
                 #[cfg(any(desktop, target_env = "ohos"))]
                 TargetKind::Stderr => std::io::stderr().into(),
+                #[cfg(target_env = "ohos")]
+                TargetKind::Hilog { tag } => {
+                    // `Builder::build()` constructs a Logger instance without
+                    // installing the global `log` logger (that's `init()`), so
+                    // the plugin's dispatch stays the single global logger and
+                    // records are forwarded to hilog via the `Log` impl.
+                    // `filter_level(Trace)` keeps the hilog-side filter
+                    // permissive — level gating already happened in the
+                    // plugin's dispatch (Builder::level).
+                    let mut builder = hilog::Builder::new();
+                    builder.set_tag(&tag).filter_level(log::LevelFilter::Trace);
+                    let logger = builder.build();
+                    fern::Output::call(move |record| log::Log::log(&logger, record))
+                }
                 TargetKind::Folder { path, file_name } => {
                     if !path.exists() {
                         fs::create_dir_all(&path)?;

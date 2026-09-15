@@ -30,6 +30,8 @@ mod mobile;
 mod commands;
 mod error;
 mod models;
+#[cfg(target_env = "ohos")]
+mod ohos;
 
 pub use error::{Error, Result};
 
@@ -237,21 +239,21 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::request_permission,
             commands::is_permission_granted,
             #[cfg(target_env = "ohos")]
-            commands::cancel,
+            ohos::cancel,
             #[cfg(target_env = "ohos")]
-            commands::get_pending,
+            ohos::get_pending,
             #[cfg(target_env = "ohos")]
-            commands::remove_active,
+            ohos::remove_active,
             #[cfg(target_env = "ohos")]
-            commands::get_active,
+            ohos::get_active,
             #[cfg(target_env = "ohos")]
-            commands::register_action_types,
+            ohos::register_action_types,
             #[cfg(target_env = "ohos")]
-            commands::create_channel,
+            ohos::create_channel,
             #[cfg(target_env = "ohos")]
-            commands::delete_channel,
+            ohos::delete_channel,
             #[cfg(target_env = "ohos")]
-            commands::list_channels,
+            ohos::list_channels,
         ])
         .js_init_script(include_str!("init-iife.js").replace(
             "__TEMPLATE_windows__",

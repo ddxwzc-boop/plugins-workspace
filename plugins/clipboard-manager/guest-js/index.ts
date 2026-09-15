@@ -9,7 +9,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core'
-import { Image } from '@tauri-apps/api/image'
+import { Image, transformImage } from '@tauri-apps/api/image'
 
 /**
  * Writes plain text to the clipboard.
@@ -48,6 +48,42 @@ async function readText(): Promise<string> {
 }
 
 /**
+ * Transforms an image into the invoke payload for `write_image`.
+ *
+ * Non-OHOS platforms keep the upstream `transformImage` semantics, so a plain
+ * object faking `{ rid: number }` is never treated as a resource id. The
+ * duck-typing path below only exists for OHOS build artifact compatibility:
+ * Vite/Rolldown may bundle @tauri-apps/api/image into multiple chunks with
+ * separate Image class definitions, so `transformImage`'s instanceof check
+ * fails for Image objects created in a different chunk (so far only observed
+ * in OHOS builds). It is only taken when the os plugin's init script injected
+ * its platform marker — when the marker is missing (os plugin not registered)
+ * we fall back to the upstream path.
+ */
+function transformImageForPlatform(
+  image: string | Image | Uint8Array | ArrayBuffer | number[]
+): string | number | Image | Uint8Array | ArrayBuffer | number[] | null {
+  // __TAURI_OS_PLUGIN_INTERNALS__ is injected by the os plugin init script;
+  // platform() in @tauri-apps/plugin-os reads the same marker.
+  const platform = (
+    window as unknown as {
+      __TAURI_OS_PLUGIN_INTERNALS__?: { platform?: string }
+    }
+  ).__TAURI_OS_PLUGIN_INTERNALS__?.platform
+  if (platform === 'ohos') {
+    interface RidHolder { rid: number }
+    return image == null
+      ? null
+      : typeof image === 'string'
+        ? image
+        : typeof (image as RidHolder).rid === 'number'
+          ? (image as RidHolder).rid
+          : image
+  }
+  return transformImage(image)
+}
+
+/**
  * Writes image buffer to the clipboard.
  *
  * #### Platform-specific
@@ -72,27 +108,12 @@ async function readText(): Promise<string> {
  *
  * @since 2.0.0
  */
+
 async function writeImage(
   image: string | Image | Uint8Array | ArrayBuffer | number[]
 ): Promise<void> {
-  // Inline duck-type transformation instead of using transformImage().
-  // Vite/Rolldown may bundle @tauri-apps/api/image into multiple chunks with
-  // separate Image class definitions. When clipboard-manager's chunk has its
-  // own Image class, transformImage's instanceof check fails for Image objects
-  // created in a different chunk. Duck-typing (typeof .rid === 'number')
-  // avoids this cross-chunk class identity problem and correctly extracts the
-  // resource ID for Image instances regardless of bundling layout.
-  interface RidHolder { rid: number }
-  const transformed: string | number | Image | Uint8Array | ArrayBuffer | number[] | null =
-    image == null
-      ? null
-      : typeof image === 'string'
-        ? image
-        : typeof (image as RidHolder).rid === 'number'
-          ? (image as RidHolder).rid
-          : image
   await invoke('plugin:clipboard-manager|write_image', {
-    image: transformed
+    image: transformImageForPlatform(image)
   })
 }
 

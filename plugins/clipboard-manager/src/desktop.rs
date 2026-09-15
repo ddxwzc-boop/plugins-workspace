@@ -19,10 +19,9 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
     app: &AppHandle<R>,
     _api: PluginApi<R, C>,
 ) -> crate::Result<Clipboard<R>> {
-    let clipboard_result = arboard::Clipboard::new().map(|c| Mutex::new(Some(c)));
     Ok(Clipboard {
         app: app.clone(),
-        clipboard: clipboard_result,
+        clipboard: arboard::Clipboard::new().map(|c| Mutex::new(Some(c))),
     })
 }
 
@@ -134,6 +133,31 @@ impl<R: Runtime> Clipboard<R> {
 
 // ─── OHOS: no arboard; write_image via TSFN bridge, other methods unsupported ───
 
+/// Runs `f` against the global OHOS app instance held in [`tauri::ohos::APP`]
+/// (same pattern as the deep-link/global-shortcut plugins). Returns `None`
+/// when the app is not initialized or its lock is poisoned.
+#[cfg(target_env = "ohos")]
+fn with_ohos_app<R>(
+    f: impl FnOnce(&tauri::ohos::openharmony_ability::OpenHarmonyApp) -> R,
+) -> Option<R> {
+    let guard = tauri::ohos::APP.lock().ok()?;
+    guard.as_ref().map(f)
+}
+
+/// Acquires the clipboard bridge client from the global OHOS app instance.
+#[cfg(target_env = "ohos")]
+fn clipboard_client() -> crate::Result<openharmony_ability_plugin_clipboard::ClipboardClient> {
+    use openharmony_ability_plugin_clipboard::ClipboardExt;
+
+    with_ohos_app(|app| app.clipboard().ok())
+        .flatten()
+        .ok_or_else(|| {
+            crate::Error::Clipboard(
+                "Failed to create ClipboardClient: OHOS APP not initialized".to_string(),
+            )
+        })
+}
+
 #[cfg(target_env = "ohos")]
 pub fn init<R: Runtime, C: DeserializeOwned>(
     app: &AppHandle<R>,
@@ -143,14 +167,13 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
     // can match it. Without this, bridge calls fail with
     // "Bridge plugin 'ohos.clipboard' is not installed for '<module>'".
     use openharmony_ability_plugin_clipboard::ClipboardBridgePlugin;
-    if let Ok(guard) = tauri::ohos::APP.lock() {
-        if let Some(ohos_app) = guard.as_ref() {
-            if let Err(e) = ohos_app.register_plugin(ClipboardBridgePlugin) {
-                log::error!(
-                    "[clipboard-manager] failed to register ClipboardBridgePlugin: {}",
-                    e
-                );
-            }
+    if let Some(result) = with_ohos_app(|ohos_app| ohos_app.register_plugin(ClipboardBridgePlugin))
+    {
+        if let Err(e) = result {
+            log::error!(
+                "[clipboard-manager] failed to register ClipboardBridgePlugin: {}",
+                e
+            );
         }
     }
     Ok(Clipboard { app: app.clone() })
@@ -171,40 +194,21 @@ pub struct Clipboard<R: Runtime> {
 #[cfg(target_env = "ohos")]
 impl<R: Runtime> Clipboard<R> {
     // write_text on OHOS: bridge plugin via openharmony-ability-plugin-clipboard.
-    // Command handler runs on a worker thread, so block_on is safe.
-    pub fn write_text<'a, T: Into<Cow<'a, str>>>(&self, text: T) -> crate::Result<()> {
-        use openharmony_ability_plugin_clipboard::ClipboardExt;
-
-        let client = tauri::ohos::APP
-            .lock()
-            .ok()
-            .and_then(|g| g.as_ref().map(|app| app.clone()))
-            .and_then(|app| app.clipboard().ok())
-            .ok_or_else(|| {
-                crate::Error::Clipboard(
-                    "Failed to create ClipboardClient: OHOS APP not initialized".to_string(),
-                )
-            })?;
+    pub async fn write_text<'a, T: Into<Cow<'a, str>>>(&self, text: T) -> crate::Result<()> {
+        let client = clipboard_client()?;
         let text = text.into().to_string();
-        futures_executor::block_on(client.write_text(text))
+        client
+            .write_text(text)
+            .await
             .map_err(|e| crate::Error::Clipboard(e.to_string()))
     }
 
     // read_text on OHOS: bridge plugin via openharmony-ability-plugin-clipboard.
-    pub fn read_text(&self) -> crate::Result<String> {
-        use openharmony_ability_plugin_clipboard::ClipboardExt;
-
-        let client = tauri::ohos::APP
-            .lock()
-            .ok()
-            .and_then(|g| g.as_ref().map(|app| app.clone()))
-            .and_then(|app| app.clipboard().ok())
-            .ok_or_else(|| {
-                crate::Error::Clipboard(
-                    "Failed to create ClipboardClient: OHOS APP not initialized".to_string(),
-                )
-            })?;
-        futures_executor::block_on(client.read_text())
+    pub async fn read_text(&self) -> crate::Result<String> {
+        let client = clipboard_client()?;
+        client
+            .read_text()
+            .await
             .map(|opt| opt.unwrap_or_default())
             .map_err(|e| crate::Error::Clipboard(e.to_string()))
     }
@@ -213,18 +217,7 @@ impl<R: Runtime> Clipboard<R> {
     // RGBA data is extracted in commands.rs before the .await boundary
     // (the ResourceTable MutexGuard is !Send and cannot cross .await).
     pub async fn write_image(&self, rgba: &[u8], width: u32, height: u32) -> crate::Result<()> {
-        use openharmony_ability_plugin_clipboard::ClipboardExt;
-
-        let client = tauri::ohos::APP
-            .lock()
-            .ok()
-            .and_then(|g| g.as_ref().map(|app| app.clone()))
-            .and_then(|app| app.clipboard().ok())
-            .ok_or_else(|| {
-                crate::Error::Clipboard(
-                    "Failed to create ClipboardClient: OHOS APP not initialized".to_string(),
-                )
-            })?;
+        let client = clipboard_client()?;
         client
             .write_image(rgba, width, height)
             .await
@@ -233,45 +226,25 @@ impl<R: Runtime> Clipboard<R> {
     }
 
     // write_html on OHOS: bridge plugin facade via openharmony-ability-plugin-clipboard.
-    // Uses block_on (same pattern as read_text) — clipboard commands run on a
-    // worker thread, not the main thread, so blocking on the bridge call is safe.
-    pub fn write_html<'a, T: Into<Cow<'a, str>>>(
+    pub async fn write_html<'a, T: Into<Cow<'a, str>>>(
         &self,
         html: T,
         _alt_text: Option<T>,
     ) -> crate::Result<()> {
-        use openharmony_ability_plugin_clipboard::ClipboardExt;
-
-        let client = tauri::ohos::APP
-            .lock()
-            .ok()
-            .and_then(|g| g.as_ref().map(|app| app.clone()))
-            .and_then(|app| app.clipboard().ok())
-            .ok_or_else(|| {
-                crate::Error::Clipboard(
-                    "Failed to create ClipboardClient: OHOS APP not initialized".to_string(),
-                )
-            })?;
-        futures_executor::block_on(client.write_html(html.into().to_string()))
+        let client = clipboard_client()?;
+        client
+            .write_html(html.into().to_string())
+            .await
             .map_err(|e| crate::Error::Clipboard(e.to_string()))?;
         Ok(())
     }
 
     // clear on OHOS: bridge plugin facade via openharmony-ability-plugin-clipboard.
-    pub fn clear(&self) -> crate::Result<()> {
-        use openharmony_ability_plugin_clipboard::ClipboardExt;
-
-        let client = tauri::ohos::APP
-            .lock()
-            .ok()
-            .and_then(|g| g.as_ref().map(|app| app.clone()))
-            .and_then(|app| app.clipboard().ok())
-            .ok_or_else(|| {
-                crate::Error::Clipboard(
-                    "Failed to create ClipboardClient: OHOS APP not initialized".to_string(),
-                )
-            })?;
-        futures_executor::block_on(client.clear())
+    pub async fn clear(&self) -> crate::Result<()> {
+        let client = clipboard_client()?;
+        client
+            .clear()
+            .await
             .map_err(|e| crate::Error::Clipboard(e.to_string()))?;
         Ok(())
     }
@@ -281,18 +254,7 @@ impl<R: Runtime> Clipboard<R> {
     // RGBA. Async like write_image (commands.rs drives both from a worker
     // thread); returns an owned Image (no arboard borrow on this path).
     pub async fn read_image(&self) -> crate::Result<Image<'static>> {
-        use openharmony_ability_plugin_clipboard::ClipboardExt;
-
-        let client = tauri::ohos::APP
-            .lock()
-            .ok()
-            .and_then(|g| g.as_ref().map(|app| app.clone()))
-            .and_then(|app| app.clipboard().ok())
-            .ok_or_else(|| {
-                crate::Error::Clipboard(
-                    "Failed to create ClipboardClient: OHOS APP not initialized".to_string(),
-                )
-            })?;
+        let client = clipboard_client()?;
         let image = client
             .read_image()
             .await

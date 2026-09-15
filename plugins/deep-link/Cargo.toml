@@ -35,7 +35,6 @@ serde_json = { workspace = true }
 tauri = { workspace = true }
 tauri-utils = { workspace = true }
 tracing = { workspace = true }
-log = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
 

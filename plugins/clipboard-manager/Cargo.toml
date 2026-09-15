@@ -19,7 +19,7 @@ linux = { level = "full", notes = "" }
 macos = { level = "full", notes = "" }
 android = { level = "partial", notes = "Only plain-text content support" }
 ios = { level = "partial", notes = "Only plain-text content support" }
-ohos = { level = "partial", notes = "write_image, write_text, read_text, write_html, clear supported; read_image not supported (READ_PASTEBOARD permission restriction)" }
+openharmony = { level = "partial", notes = "All six methods supported; read_text/read_image need the READ_PASTEBOARD permission (requested at runtime, degrades gracefully when denied)" }
 
 
 [build-dependencies]
@@ -40,4 +40,3 @@ arboard = { version = "3", features = ["wayland-data-control"] }
 
 [target.'cfg(target_env = "ohos")'.dependencies]
 openharmony-ability-plugin-clipboard = { path = "../../../openharmony-ability/crates/plugin-clipboard" }
-futures-executor = "0.3"

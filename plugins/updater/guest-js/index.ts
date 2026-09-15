@@ -142,49 +142,6 @@ async function check(options?: CheckOptions): Promise<Update | null> {
   return metadata ? new Update(metadata) : null
 }
 
-/** AppGallery update info (OpenHarmony only) */
-interface AppGalleryUpdate {
-  /**
-   * Always `true` when this object is returned — a `null` result means no
-   * update is available. Kept for API-explicitness.
-   */
-  available: boolean
-  /** The currently installed version */
-  currentVersion: string
-  /** The available update version, or `null` on API levels below 20 */
-  version: string | null
-}
-
-/**
- * Check for updates via AppGallery (OpenHarmony only).
- *
- * The update source is AppGallery — the desktop `check` options (headers,
- * timeout, proxy, target, allowDowngrades) do not apply. `version` is `null`
- * on API levels below 20 (`versionName` unavailable).
- *
- * Resolves to `null` when no update is available.
- *
- * @platform openharmony
- */
-async function checkAppGalleryUpdate(): Promise<AppGalleryUpdate | null> {
-  return await invoke<AppGalleryUpdate | null>(
-    'plugin:updater|check_app_gallery_update'
-  )
-}
-
-/**
- * Show the system AppGallery update dialog (OpenHarmony only).
- *
- * The system dialog drives the entire download + installation flow and
- * whether to update is the user's decision; the promise resolves once the
- * dialog request is dispatched (it does NOT mean the update was installed).
- *
- * @platform openharmony
- */
-async function showAppGalleryUpdateDialog(): Promise<void> {
-  await invoke('plugin:updater|show_app_gallery_update_dialog')
-}
-
 /**
  * Converts the headers in options to be an {@linkcode Array<[string, string]>} which is what the Rust side expects
  */
@@ -194,10 +151,53 @@ function convertToRustHeaders(options?: { headers?: HeadersInit }) {
   }
 }
 
-export type { CheckOptions, DownloadOptions, DownloadEvent, AppGalleryUpdate }
-export {
-  check,
-  checkAppGalleryUpdate,
-  showAppGalleryUpdateDialog,
-  Update
+/** AppGallery update check result */
+interface AppGalleryUpdate {
+  /**
+   * Whether an update is available on AppGallery
+   */
+  available: boolean
+  /**
+   * Version of the currently running application
+   */
+  currentVersion: string
+  /**
+   * Version of the available update, or `null` if not reported by the system
+   */
+  version: string | null
 }
+
+/**
+ * Check for updates on AppGallery.
+ *
+ * Only available on OpenHarmony. The update source is Huawei AppGallery, not
+ * the `endpoints`/`pubkey` configuration in `tauri.conf.json` - that
+ * configuration has no effect on OpenHarmony.
+ *
+ * `version` is `null` on devices with an API level lower than 20, where the
+ * system does not report the new version number.
+ *
+ * @since 2.11.0
+ */
+async function checkAppGalleryUpdate(): Promise<AppGalleryUpdate | null> {
+  const info = await invoke<AppGalleryUpdate>(
+    'plugin:updater|check_app_gallery_update'
+  )
+  return info.available ? info : null
+}
+
+/**
+ * Show the system update dialog of AppGallery.
+ *
+ * Only available on OpenHarmony. The dialog is user-driven - whether to
+ * download and install the update is decided by the user, so this promise
+ * resolving does not mean the update was installed.
+ *
+ * @since 2.11.0
+ */
+async function showAppGalleryUpdateDialog(): Promise<void> {
+  await invoke('plugin:updater|show_app_gallery_update_dialog')
+}
+
+export type { CheckOptions, DownloadOptions, DownloadEvent, AppGalleryUpdate }
+export { check, Update, checkAppGalleryUpdate, showAppGalleryUpdateDialog }

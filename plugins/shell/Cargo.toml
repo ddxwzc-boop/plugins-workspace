@@ -15,6 +15,7 @@ linux = { level = "full", notes = "" }
 macos = { level = "full", notes = "" }
 android = { level = "partial", notes = "Only allows to open URLs via `open`" }
 ios = { level = "partial", notes = "Only allows to open URLs via `open`" }
+openharmony = { level = "partial", notes = "Child process spawning works via std; the deprecated `open` API depends on desktop Linux helpers (xdg-open, gio, ...) that are not present on OpenHarmony." }
 
 [build-dependencies]
 tauri-plugin = { workspace = true, features = ["build"] }

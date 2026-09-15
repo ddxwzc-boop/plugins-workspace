@@ -15,6 +15,7 @@ linux = { level = "full", notes = "No write access to `$RESOURCES` folder" }
 macos = { level = "full", notes = "No write access to `$RESOURCES` folder" }
 android = { level = "partial", notes = "Access is restricted to Application folder by default" }
 ios = { level = "partial", notes = "Access is restricted to Application folder by default" }
+openharmony = { level = "partial", notes = "Desktop-style std::fs backend; access restricted to the app sandbox by default" }
 
 [build-dependencies]
 tauri-plugin = { workspace = true, features = ["build"] }

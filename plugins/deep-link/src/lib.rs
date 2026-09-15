@@ -16,6 +16,16 @@ pub use error::{Error, Result};
 #[cfg(target_os = "android")]
 const PLUGIN_IDENTIFIER: &str = "app.tauri.deep_link";
 
+/// Runs `f` against the global OHOS app instance held in [`tauri::ohos::APP`].
+/// Returns `None` when the app is not initialized yet or its lock is poisoned.
+#[cfg(target_env = "ohos")]
+fn with_ohos_app<R>(
+    f: impl FnOnce(&tauri::ohos::openharmony_ability::OpenHarmonyApp) -> R,
+) -> Option<R> {
+    let guard = tauri::ohos::APP.lock().ok()?;
+    guard.as_ref().map(f)
+}
+
 fn init_deep_link<R: Runtime>(
     app: &AppHandle<R>,
     api: PluginApi<R, Option<config::Config>>,
@@ -72,22 +82,17 @@ fn init_deep_link<R: Runtime>(
 
     #[cfg(target_env = "ohos")]
     {
-        log::info!("[deep-link] init_deep_link OHOS branch");
+        tracing::debug!("init_deep_link OHOS branch");
 
         // Register the Rust-side DeepLink bridge plugin so ArkTS configurePlugins
         // can match it. Without this, bridge calls fail with
         // "Bridge plugin 'ohos.deep-link' is not installed for '<module>'".
         use openharmony_ability_plugin_deep_link::DeepLinkBridgePlugin;
-        if let Ok(guard) = tauri::ohos::APP.lock() {
-            if let Some(ohos_app) = guard.as_ref() {
-                if let Err(e) = ohos_app.register_plugin(DeepLinkBridgePlugin) {
-                    log::error!(
-                        "[deep-link] failed to register DeepLinkBridgePlugin: {}",
-                        e
-                    );
-                }
+        let _ = with_ohos_app(|ohos_app| {
+            if let Err(e) = ohos_app.register_plugin(DeepLinkBridgePlugin) {
+                tracing::error!("failed to register DeepLinkBridgePlugin: {e}");
             }
-        }
+        });
 
         return Ok(DeepLink {
             app: app.clone(),
@@ -261,28 +266,21 @@ mod imp {
                 use openharmony_ability_plugin_deep_link::DeepLinkExt;
 
                 // Lazy take: first get_current reads cold-start want.uri (stored by onAbilityCreateWithWant)
-                let initial = if let Ok(guard) = tauri::ohos::APP.lock() {
-                    if let Some(app) = guard.as_ref() {
-                        match app.deep_link() {
-                            Ok(client) => client.take_initial_uri(),
-                            Err(_) => String::new(),
-                        }
-                    } else {
-                        String::new()
-                    }
-                } else {
-                    String::new()
-                };
-                log::info!("[deep-link] get_current lazy-take returned: {:?}", initial);
+                let initial = crate::with_ohos_app(|app| match app.deep_link() {
+                    Ok(client) => client.take_initial_uri(),
+                    Err(_) => String::new(),
+                })
+                .unwrap_or_default();
+                tracing::debug!("get_current lazy-take returned: {:?}", initial);
                 if !initial.is_empty() {
-                    log::info!("[deep-link] get_current lazy-take initial uri: {}", initial);
+                    tracing::debug!("get_current lazy-take initial uri: {}", initial);
                     if let Ok(url) = initial.parse::<url::Url>() {
                         let mut current = self.current.lock().unwrap();
                         if current.is_none() {
                             current.replace(vec![url]);
                         }
                     } else {
-                        log::warn!("[deep-link] failed to parse initial want uri: {}", initial);
+                        tracing::warn!("failed to parse initial want uri: {}", initial);
                     }
                 }
             }

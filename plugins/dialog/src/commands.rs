@@ -127,7 +127,6 @@ pub(crate) async fn open<R: Runtime>(
     dialog: State<'_, Dialog<R>>,
     options: OpenDialogOptions,
 ) -> Result<OpenResponse> {
-    log::info!("[dialog::open] command called, directory={}, multiple={}", options.directory, options.multiple);
     let mut dialog_builder = dialog.file();
     #[cfg(any(windows, target_os = "macos"))]
     {

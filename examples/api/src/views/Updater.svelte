@@ -1,8 +1,15 @@
 <script>
-  import { check } from '@tauri-apps/plugin-updater'
+  import {
+    check,
+    checkAppGalleryUpdate,
+    showAppGalleryUpdateDialog
+  } from '@tauri-apps/plugin-updater'
   import { relaunch } from '@tauri-apps/plugin-process'
+  import { platform } from '@tauri-apps/plugin-os'
 
   export let onMessage
+
+  const isOhos = platform() === 'ohos'
 
   let isChecking, isInstalling, newUpdate
   let totalSize = 0,
@@ -11,14 +18,26 @@
   async function checkUpdate() {
     isChecking = true
     try {
-      const update = await check()
-      if (update) {
-        onMessage(`Should update: ${update.available}`)
-        onMessage(update)
+      if (isOhos) {
+        const update = await checkAppGalleryUpdate()
+        if (update) {
+          onMessage(`Should update: ${update.version ?? 'unknown'}`)
+          onMessage(update)
 
-        newUpdate = update
+          newUpdate = update
+        } else {
+          onMessage('No update available')
+        }
       } else {
-        onMessage('No update available')
+        const update = await check()
+        if (update) {
+          onMessage(`Should update: ${update.available}`)
+          onMessage(update)
+
+          newUpdate = update
+        } else {
+          onMessage('No update available')
+        }
       }
     } catch (e) {
       onMessage(e)
@@ -28,6 +47,19 @@
   }
 
   async function install() {
+    if (isOhos) {
+      isInstalling = true
+      try {
+        await showAppGalleryUpdateDialog()
+        onMessage('Update dialog shown')
+      } catch (e) {
+        console.error(e)
+        onMessage(e)
+      } finally {
+        isInstalling = false
+      }
+      return
+    }
     isInstalling = true
     downloadedSize = 0
     try {
@@ -61,8 +93,10 @@
   {#if !isChecking && !newUpdate}
     <button class="btn" on:click={checkUpdate}>Check update</button>
   {:else if !isInstalling && newUpdate}
-    <button class="btn" on:click={install}>Install update</button>
-  {:else}
+    <button class="btn" on:click={install}>
+      {isOhos ? 'Show update dialog' : 'Install update'}
+    </button>
+  {:else if !isOhos}
     <div class="progress">
       <span>{progress}%</span>
       <div class="progress-bar" style="width: {progress}%"></div>
