@@ -223,7 +223,7 @@ impl std::error::Error for HotKeyParseError {}
 /// Convert OHOS stub modifiers to facade-compatible string names.
 /// Returns `"Control"`, `"Alt"`, `"Shift"`, `"Super"` — matching the
 /// `GlobalShortcutClient::register()` modifier name contract.
-fn to_ohos_modifier_names(modifiers: &[Modifiers]) -> Vec<String> {
+pub(crate) fn to_ohos_modifier_names(modifiers: &[Modifiers]) -> Vec<String> {
     modifiers
         .iter()
         .map(|m| m.to_ohos_name().to_string())
@@ -270,22 +270,51 @@ pub(crate) fn next_registration_stamp() -> u32 {
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Register a shortcut on a worker thread (fire-and-forget).
+/// Register `id` on the ArkTS side, cleaning up the locally-inserted store
+/// entry when the registration is rejected.
+///
+/// Shared by the fire-and-forget [`spawn_register`] worker and the JS-facing
+/// async `register` command: the latter awaits this directly on a tokio
+/// worker (never the ArkTS main thread, where blocking would deadlock), so a
+/// rejected registration rejects the command's promise — matching desktop
+/// semantics where `register` blocks and returns the error.
+///
+/// The stamp-guarded removal keeps `isRegistered` from reporting a ghost
+/// registration, but only when the entry still carries this attempt's stamp:
+/// if the same id was re-registered in between (replacing the entry with a
+/// newer stamp), the stale attempt must not undo the newer registration.
+/// The stamp doubles as the request's `generation`: when a newer-generation
+/// unregister / unregister-all has already been served on the ArkTS side,
+/// the request is rejected there (no physical registration happens) and this
+/// same Err path runs against the already-updated store — a no-op.
+pub(crate) async fn register_and_cleanup<R: Runtime>(
+    client: &GlobalShortcutClient,
+    id: HotKeyId,
+    modifier_names: &[String],
+    key: &str,
+    stamp: u32,
+    shortcuts: &Arc<Mutex<HashMap<HotKeyId, RegisteredShortcut<R>>>>,
+) -> std::result::Result<(), String> {
+    if let Err(e) = client.register(id, modifier_names, key, stamp).await {
+        log::error!("[global-shortcut] Failed to register shortcut {}: {:?}", id, e);
+        let mut shortcuts = lock_shortcuts(shortcuts);
+        if shortcuts.get(&id).is_some_and(|entry| entry.stamp == stamp) {
+            shortcuts.remove(&id);
+        }
+        return Err(e.to_string());
+    }
+    Ok(())
+}
+
+/// Register a shortcut on a worker thread (fire-and-forget); a rejection is
+/// log-only (the cleanup inside [`register_and_cleanup`] still applies)
+/// because these callers have no result channel to surface it on.
 ///
 /// The facade's async `register()` dispatches through the bridge TSFN to the
 /// ArkTS main thread; blocking on the main thread would deadlock, so each
 /// call spawns a worker thread and `block_on`s there. Callers insert into the
 /// store synchronously before spawning (a hotkey that fires immediately must
-/// find its handler); when ArkTS later rejects the registration, the worker
-/// removes that entry again so `isRegistered` cannot report a ghost
-/// registration — but only when the entry still carries this worker's stamp:
-/// if the same id was re-registered in between (replacing the entry with a
-/// newer stamp), the stale worker must not undo the newer registration.
-///
-/// The stamp doubles as the request's `generation`: when a newer-generation
-/// unregister / unregister-all has already been served on the ArkTS side,
-/// the request is rejected there (no physical registration happens) and this
-/// same Err path runs against the already-updated store — a no-op.
+/// find its handler).
 pub(crate) fn spawn_register<R: Runtime>(
     client: GlobalShortcutClient,
     id: HotKeyId,
@@ -298,15 +327,14 @@ pub(crate) fn spawn_register<R: Runtime>(
     let key = key.to_string();
     std::thread::spawn(move || {
         log::info!("[global-shortcut] register ENTER id={}", id);
-        if let Err(e) =
-            futures_executor::block_on(client.register(id, &modifier_names, &key, stamp))
-        {
-            log::error!("[global-shortcut] Failed to register shortcut {}: {:?}", id, e);
-            let mut shortcuts = lock_shortcuts(&shortcuts);
-            if shortcuts.get(&id).is_some_and(|entry| entry.stamp == stamp) {
-                shortcuts.remove(&id);
-            }
-        }
+        let _ = futures_executor::block_on(register_and_cleanup(
+            &client,
+            id,
+            &modifier_names,
+            &key,
+            stamp,
+            &shortcuts,
+        ));
     });
 }
 

@@ -283,6 +283,56 @@ impl<R: Runtime> GlobalShortcut<R> {
 
         Ok(())
     }
+
+    /// Awaited variant of [`register_multiple_internal`] for the JS-facing
+    /// `register` command on OHOS: awaits the real ArkTS receipt so a
+    /// rejected registration rejects the command's promise (desktop parity —
+    /// upstream `register` blocks on the main thread and returns the error).
+    ///
+    /// Keeps the same insert-before-dispatch + stamp discipline as the
+    /// fire-and-forget path: the store lock is never held across an await,
+    /// a hotkey that fires immediately finds its handler, and a rejection
+    /// removes the entry again (generation-aware). Like desktop fail-fast,
+    /// earlier successes in the batch stay registered when one entry fails.
+    #[cfg(target_env = "ohos")]
+    async fn register_multiple_internal_awaited<S, F>(&self, shortcuts: S, handler: Option<F>) -> Result<()>
+    where
+        S: IntoIterator<Item = Shortcut>,
+        F: Fn(&AppHandle<R>, &Shortcut, ShortcutEvent) + Send + Sync + 'static,
+    {
+        ohos_require_hotkey_api("register")?;
+
+        let handler = handler.map(|h| Arc::new(Box::new(h) as HandlerFn<R>));
+        let hotkeys = shortcuts.into_iter().collect::<Vec<_>>();
+
+        for shortcut in hotkeys {
+            let id = shortcut.id();
+            let client = self.client.as_ref().ok_or_else(|| {
+                Error::GlobalHotkey("GlobalShortcutClient not initialized".to_string())
+            })?;
+            let modifiers = shortcut.modifiers().to_vec();
+            let key = shortcut.code().to_ohos_name().to_string();
+            let modifier_names = ohos::to_ohos_modifier_names(&modifiers);
+            let stamp = {
+                let mut shortcuts = lock_shortcuts(&self.shortcuts);
+                let stamp = ohos::next_registration_stamp();
+                shortcuts.insert(
+                    id,
+                    RegisteredShortcut {
+                        shortcut,
+                        handler: handler.clone(),
+                        stamp,
+                    },
+                );
+                stamp
+            };
+            ohos::register_and_cleanup(client, id, &modifier_names, &key, stamp, &self.shortcuts)
+                .await
+                .map_err(Error::GlobalHotkey)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl<R: Runtime> GlobalShortcut<R> {
@@ -502,16 +552,20 @@ impl<R: Runtime> GlobalShortcut<R> {
     /// If the shortcut is registered by another application, it will still return `false`.
     ///
     /// # OHOS note
-    /// Registration is asynchronous: `register()` returns immediately after
-    /// queueing the request, while the actual `inputConsumer.on()` call happens
-    /// asynchronously on the ArkTS main thread. This function queries the local
-    /// `shortcuts` map, so it may return `true` briefly before the ArkTS
-    /// registration completes. If ArkTS rejects the registration, the entry is
-    /// removed again, so subsequent calls report `false`. The reverse drift —
-    /// a physical registration the local map does not know about — is closed
-    /// by the generation guard on the ArkTS side: an unregister /
-    /// unregister-all that raced an in-flight register supersedes it, and the
-    /// stale register is rejected there instead of taking effect.
+    /// Registration is asynchronous: the Rust-side `register()` returns
+    /// immediately after queueing the request, while the actual
+    /// `inputConsumer.on()` call happens asynchronously on the ArkTS main
+    /// thread. This function queries the local `shortcuts` map, so it may
+    /// return `true` briefly before the ArkTS registration completes. The
+    /// JS-facing `register` command awaits the real ArkTS receipt, so from
+    /// JavaScript a resolved `register()` implies the registration is live
+    /// and a rejection has already cleaned the local entry. If ArkTS
+    /// rejects a fire-and-forget registration (Rust-side API), the entry is
+    /// removed again, so subsequent calls report `false`. The reverse
+    /// drift — a physical registration the local map does not know about —
+    /// is closed by the generation guard on the ArkTS side: an unregister /
+    /// unregister-all that raced an in-flight register supersedes it, and
+    /// the stale register is rejected there instead of taking effect.
     pub fn is_registered<S: TryInto<ShortcutWrapper>>(&self, shortcut: S) -> bool
     where
         S::Error: std::error::Error,
@@ -565,6 +619,9 @@ struct ShortcutJsEvent {
     state: ShortcutState,
 }
 
+// Desktop: byte-identical upstream command (blocks on the main thread and
+// propagates a registration failure as the command's error).
+#[cfg(not(target_env = "ohos"))]
 #[tauri::command]
 fn register<R: Runtime>(
     _app: AppHandle<R>,
@@ -594,6 +651,45 @@ fn register<R: Runtime>(
             },
         ),
     )
+}
+
+// OHOS: async so the command runs on the tokio pool (never the ArkTS main
+// thread, where awaiting the bridge reply would deadlock) and can await the
+// real ArkTS registration receipt — a rejected registration (hotkey taken,
+// unsupported key, …) rejects the JS promise instead of resolving like the
+// fire-and-forget path did (issue C71).
+#[cfg(target_env = "ohos")]
+#[tauri::command]
+async fn register<R: Runtime>(
+    _app: AppHandle<R>,
+    global_shortcut: State<'_, GlobalShortcut<R>>,
+    shortcuts: Vec<String>,
+    handler: Channel<ShortcutJsEvent>,
+) -> Result<()> {
+    let mut hotkeys = Vec::new();
+
+    let mut shortcut_map = HashMap::new();
+    for shortcut in shortcuts {
+        let hotkey = parse_shortcut(&shortcut)?;
+        shortcut_map.insert(hotkey.id(), shortcut);
+        hotkeys.push(hotkey);
+    }
+
+    global_shortcut
+        .register_multiple_internal_awaited(
+            hotkeys,
+            Some(
+                move |_app: &AppHandle<R>, shortcut: &Shortcut, e: ShortcutEvent| {
+                    let js_event = ShortcutJsEvent {
+                        id: e.id,
+                        state: e.state,
+                        shortcut: shortcut.into_string(),
+                    };
+                    let _ = handler.send(js_event);
+                },
+            ),
+        )
+        .await
 }
 
 #[tauri::command]
