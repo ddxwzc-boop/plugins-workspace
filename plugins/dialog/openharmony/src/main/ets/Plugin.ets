@@ -28,7 +28,7 @@ interface SaveArgs {
 interface MessageArgs {
   title?: string;
   message?: string;
-  type?: string;
+  kind?: string;
   okButtonLabel?: string;
   noButtonLabel?: string;
   cancelButtonLabel?: string;
@@ -49,7 +49,7 @@ export class DialogPlugin extends Plugin {
     const args: OpenArgs = JSON.parse(argsStr) as OpenArgs;
     const multiple = args.multiple ?? false;
     const directory = args.directory ?? false;
-    this.showDocumentPicker(invoke, multiple, directory);
+    this.showDocumentPicker(invoke, multiple, directory, args.filters ?? []);
   }
 
   private handleSave(invoke: Invoke): void {
@@ -57,7 +57,7 @@ export class DialogPlugin extends Plugin {
     console.info('[DialogPlugin] saveFileDialog args: ' + argsStr);
     const args: SaveArgs = JSON.parse(argsStr) as SaveArgs;
     const fileName = args.fileName ?? 'untitled';
-    this.showSavePicker(invoke, fileName);
+    this.showSavePicker(invoke, fileName, args.filters ?? []);
   }
 
   private handleMessage(invoke: Invoke): void {
@@ -66,6 +66,7 @@ export class DialogPlugin extends Plugin {
     const args: MessageArgs = JSON.parse(argsStr) as MessageArgs;
     const title = args.title ?? '';
     const message = args.message ?? '';
+    const kind = args.kind ?? 'info';
     const buttons: string[] = [];
     if (args.okButtonLabel != null) {
       buttons.push(args.okButtonLabel);
@@ -79,16 +80,30 @@ export class DialogPlugin extends Plugin {
     if (buttons.length === 0) {
       buttons.push('OK');
     }
-    this.showMessageBox(invoke, title, message, buttons);
+    this.showMessageBox(invoke, title, message, buttons, kind);
   }
 
-  private async showDocumentPicker(invoke: Invoke, multiple: boolean, directory: boolean): Promise<void> {
+  private async showDocumentPicker(invoke: Invoke, multiple: boolean, directory: boolean, filters: FileFilter[]): Promise<void> {
     try {
       console.info('[DialogPlugin] showDocumentPicker multiple=' + multiple + ' directory=' + directory);
       const documentPicker = new picker.DocumentViewPicker();
+      // Documented range is 1-500 (@ohos.file.picker d.ts; the online
+      // reference caps at 500 for API <= 20 and lifts the file-count limit
+      // from API 21) — 10 was an arbitrary cap that silently truncated
+      // multi-select. Mirrors the ohos.files bridge (allowMany ? 500 : 1).
       const options: picker.DocumentSelectOptions = {
-        maxSelectNumber: multiple ? 10 : 1
+        maxSelectNumber: multiple ? 500 : 1
       };
+      // Suffix filters apply to file picking only: folder mode must keep its
+      // #99/#124-verified behavior, and the fileSuffixFilters x
+      // selectMode(FOLDER/MIXED) combination is undocumented — the ohos.files
+      // bridge likewise leaves fileSuffixFilters unset for folder picking.
+      if (!directory) {
+        const suffixFilters = this.pickerSuffixChoices(filters);
+        if (suffixFilters !== undefined) {
+          options.fileSuffixFilters = suffixFilters;
+        }
+      }
 
       // Folder selection (Eulogizethesun/tauri#99): DocumentViewPicker has no
       // dedicated folder mode — selectMode decides what can be picked.
@@ -145,6 +160,47 @@ export class DialogPlugin extends Plugin {
     }
   }
 
+  // Converts Tauri filters ({ name, extensions }) to the picker's
+  // "description|.ext1,.ext2" choice strings — the grammar of
+  // DocumentSelectOptions.fileSuffixFilters and
+  // DocumentSaveOptions.fileSuffixChoices (@ohos.file.picker d.ts:
+  // each element is "description|suffixes", comma-separated suffixes,
+  // max 100 elements; default is no filtering). Mirrors the ohos.files
+  // bridge (FilesPlugin.ets pickerSuffixFilters).
+  private pickerSuffixChoices(filters: FileFilter[]): string[] | undefined {
+    const choices: string[] = [];
+    for (const filter of filters) {
+      const name = (filter.name ?? 'Files').split('|').join(' ');
+      const suffixes: string[] = [];
+      for (const extension of filter.extensions ?? []) {
+        const trimmed = extension.trim();
+        if (trimmed.length === 0) {
+          continue;
+        }
+        if (trimmed.indexOf('/') >= 0) {
+          // MIME types (allowed in `extensions` by the JS API on mobile)
+          // cannot be expressed in the suffix grammar — skip instead of
+          // producing a filter that matches nothing.
+          console.warn('[DialogPlugin] skipping MIME-type filter entry: ' + trimmed);
+          continue;
+        }
+        if (trimmed === '*' || trimmed === '*.*') {
+          // "All files" wildcard (2in1; API 17+ on phone).
+          suffixes.push('.*');
+        } else {
+          suffixes.push(trimmed.startsWith('.') ? trimmed : '.' + trimmed);
+        }
+      }
+      if (suffixes.length > 0) {
+        choices.push(name + '|' + suffixes.join(','));
+      }
+    }
+    if (choices.length === 0) {
+      return undefined;
+    }
+    return choices.slice(0, 100);
+  }
+
   // Checks whether a picker-returned URI points to a directory
   // (Eulogizethesun/tauri#124).
   // - API 22+: fs.statSync accepts URIs directly, so Stat.isDirectory()
@@ -170,13 +226,17 @@ export class DialogPlugin extends Plugin {
     }
   }
 
-  private async showSavePicker(invoke: Invoke, fileName: string): Promise<void> {
+  private async showSavePicker(invoke: Invoke, fileName: string, filters: FileFilter[]): Promise<void> {
     try {
       console.info('[DialogPlugin] showSavePicker fileName=' + fileName);
       const documentPicker = new picker.DocumentViewPicker();
       const options: picker.DocumentSaveOptions = {
         newFileNames: [fileName]
       };
+      const suffixChoices = this.pickerSuffixChoices(filters);
+      if (suffixChoices !== undefined) {
+        options.fileSuffixChoices = suffixChoices;
+      }
 
       const result = await documentPicker.save(options);
       console.info('[DialogPlugin] savePicker result: ' + JSON.stringify(result));
@@ -192,16 +252,36 @@ export class DialogPlugin extends Plugin {
     }
   }
 
-  private async showMessageBox(invoke: Invoke, title: string, message: string, buttons: string[]): Promise<void> {
+  private async showMessageBox(invoke: Invoke, title: string, message: string, buttons: string[], kind: string): Promise<void> {
     try {
-      console.info('[DialogPlugin] showMessageBox title=' + title + ', message=' + message);
+      console.info('[DialogPlugin] showMessageBox title=' + title + ', message=' + message + ', kind=' + kind);
       const buttonOptions: promptAction.Button[] = buttons.map((text: string): promptAction.Button => {
         return { text: text, color: '#1890FF' };
       });
 
+      // promptAction.ShowDialogOptions has no icon/severity parameter (nor
+      // does ArkUI AlertDialog) — the info/warning/error level is expressed
+      // as a glyph prefix on the title (on the message when there is no
+      // title), the only channel the system dialog offers.
+      let dialogTitle: string = title;
+      let dialogMessage: string = message;
+      let prefix: string = '';
+      if (kind === 'warning') {
+        prefix = '⚠️ '; // warning sign
+      } else if (kind === 'error') {
+        prefix = '❌ '; // cross mark
+      }
+      if (prefix !== '') {
+        if (dialogTitle.length > 0) {
+          dialogTitle = prefix + dialogTitle;
+        } else {
+          dialogMessage = prefix + dialogMessage;
+        }
+      }
+
       const result = await promptAction.showDialog({
-        title: title,
-        message: message,
+        title: dialogTitle,
+        message: dialogMessage,
         buttons: buttonOptions
       });
 
