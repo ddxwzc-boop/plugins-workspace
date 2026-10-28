@@ -9,6 +9,7 @@ Access the file system.
 | macOS    | ✓         |
 | Android  | ✓         |
 | iOS      | ✓         |
+| OpenHarmony | ✓ (app-sandbox paths only, see below) |
 
 ## Install
 
@@ -63,6 +64,24 @@ import { stat } from '@tauri-apps/plugin-fs'
 
 await stat('/path/to/file')
 ```
+
+## OpenHarmony (OHOS) Notes
+
+On OpenHarmony the plugin runs on the desktop `std::fs` backend and access is
+restricted to the application sandbox by default (the configured scope still
+applies). Only plain paths and `file://` URLs that resolve to local filesystem
+paths are accepted: system content URIs — for example the `content://` style
+URIs used on Android, or URIs returned by the OpenHarmony photo and document
+pickers and DataShare (`datashare://`) — are rejected before any filesystem
+access. Most commands fail with a `URL is not a valid path` error; on the
+mobile form factor the `open` API fails with `cannot use a URL to load files
+on desktop and iOS` (non-`file` schemes) or `invalid file URL` (`file://`
+URIs with a non-localhost host, such as picker URIs) instead. There is no
+content-URI bridging like on Android.
+
+The `watch` API is backed by the `notify` crate's generic `inotify` backend.
+Watching directories inside the application sandbox works; there is no
+OpenHarmony-specific watcher implementation.
 
 ## Contributing
 
