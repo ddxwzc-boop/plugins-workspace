@@ -611,7 +611,7 @@ impl<R: Runtime> Store<R> {
                     guard.save()
                 }
                 Err(_) => {
-                    tracing::warn!("store: StoreInner locked on exit, skipping save");
+                    tracing::warn!("store: StoreInner locked, skipping save");
                     Ok(())
                 }
             }
@@ -672,25 +672,45 @@ impl<R: Runtime> Store<R> {
     }
 
     fn apply_pending_auto_save(&self) {
-        // Cancel and save if auto save is pending
-        if let Some(sender) = self.auto_save_debounce_sender.lock().unwrap().take() {
+        // Cancel and save if auto save is pending. Bind `take()` to a `let`
+        // first: an if-let scrutinee's temporary MutexGuard lives to the end
+        // of the block, and `save_or_skip`/`save` re-lock the same mutex
+        // inside it — the same-thread re-entrant deadlock upstream fixed in
+        // tauri-apps/plugins-workspace#3572 (c050e073).
+        let sender = self.auto_save_debounce_sender.lock().unwrap().take();
+        if let Some(sender) = sender {
             let _ = sender.send(AutoSaveMessage::Cancel);
             // Drop 路径复用 save_or_skip:OHOS 下 StoreInner 争用时 try_lock 失败则降级跳过,
             // 避免主线程阻塞触发 appfreeze;其他平台透传 self.save() 行为不变。
             let _ = self.save_or_skip();
-        };
+        }
     }
 }
 
 impl<R: Runtime> Drop for Store<R> {
     fn drop(&mut self) {
-        // OHOS: Drop 路径完全跳过 auto-save。apply_pending_auto_save 会获取
-        // auto_save_debounce_sender Mutex(被 in-flight debounce 任务持有)+ StoreInner Mutex,
-        // 在 Drop 内阻塞导致 invoke 响应延迟/timeout(appfreeze 风险)。调用方应显式 save();
-        // 与 RunEvent::Exit 的 save_or_skip 降级策略一致。其他平台走原 apply_pending_auto_save。
+        // OHOS: non-blocking best-effort instead of a full skip. `try_lock`
+        // never blocks: a contended sender mutex means an in-flight debounce
+        // task holds it, and that task has already committed to saving (its
+        // `take()` runs in a microsecond window before the file I/O), so
+        // skipping is safe. With no pending sender this is a no-op — on a
+        // normal exit the RunEvent::Exit handler drains the sender first.
+        // The guard is dropped before `save_or_skip` runs (it re-locks this
+        // mutex internally — the upstream #3572 deadlock pattern). A directly
+        // killed process still loses the ≤100ms debounce window; callers
+        // should `save()` explicitly for critical data.
         #[cfg(target_env = "ohos")]
         {
-            return;
+            let sender = match self.auto_save_debounce_sender.try_lock() {
+                Ok(mut guard) => guard.take(),
+                Err(_) => None,
+            };
+            if let Some(sender) = sender {
+                let _ = sender.send(AutoSaveMessage::Cancel);
+                if let Err(err) = self.save_or_skip() {
+                    tracing::warn!("store: Drop auto-save failed: {err:?}");
+                }
+            }
         }
         #[cfg(not(target_env = "ohos"))]
         self.apply_pending_auto_save();
