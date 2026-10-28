@@ -77,6 +77,8 @@ scan({ windowed: true, formats: [''] })
 - `windowed` — ignored: the system page is always fullscreen.
 - `cancel` — no-op: the system page closes itself on scan or back press.
 
+The `bounds` field of the resolved value is always `null` on OpenHarmony: Scan Kit's `ScanResult` declares the code position as an optional `scanCodeRect` field, but the current implementation does not map it.
+
 ## Contributing
 
 PRs accepted. Please make sure to read the Contributing Guide before making a pull request.
