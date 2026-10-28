@@ -9,6 +9,7 @@ Access the system shell. Allows you to spawn child processes and manage files an
 | macOS    | ✓         |
 | Android  | ✓         |
 | iOS      | ✓         |
+| OpenHarmony | ✓ (open is limited, see below) |
 
 ## Install
 
@@ -62,6 +63,28 @@ Afterwards all the plugin's APIs are available through the JavaScript guest bind
 import { Command } from '@tauri-apps/plugin-shell'
 Command.create('git', ['commit', '-m', 'the commit message'])
 ```
+
+## OpenHarmony (OHOS) Platform Notes
+
+On OpenHarmony, the deprecated `open` API (JS `open()`, Rust `Shell::open`,
+and the `_blank` link interception installed by this plugin's init script) is
+routed through the **openharmony-ability URL bridge** — the same system link
+opener used by `tauri-plugin-opener` — instead of the desktop Linux helpers
+(`xdg-open`, `gio`, ...) which do not exist on OHOS. Consequences:
+
+- `open('https://…')` resolves once the system link opener accepts the request;
+  the browser (or other default handler) is brought to the foreground.
+- `'open with'` (the `with` program argument) is unsupported and ignored —
+  the system default application is always used.
+- Absolute URLs are forwarded to the opener as-is. Non-URL arguments are
+  treated as filesystem paths and canonicalized into `file://` URIs; a
+  missing relative path fails with an IO error.
+- The bridge requires a `://` scheme, so `mailto:`/`tel:` URLs — accepted by
+  the default `plugins > shell > open` validation regex — are rejected by the
+  bridge on OHOS with a platform error. Use `https://` URLs.
+- The Rust `Shell::open` / `tauri_plugin_shell::open::open` functions are
+  `async` on OHOS (bridge round-trip), unlike the synchronous desktop
+  variants.
 
 ## Contributing
 

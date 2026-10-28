@@ -15,7 +15,7 @@ linux = { level = "full", notes = "" }
 macos = { level = "full", notes = "" }
 android = { level = "partial", notes = "Only allows to open URLs via `open`" }
 ios = { level = "partial", notes = "Only allows to open URLs via `open`" }
-openharmony = { level = "partial", notes = "Child process spawning works via std; the deprecated `open` API depends on desktop Linux helpers (xdg-open, gio, ...) that are not present on OpenHarmony." }
+openharmony = { level = "partial", notes = "Child process spawning works via std; the deprecated `open` API opens URLs/paths with the system default application through the openharmony-ability bridge (`with` is ignored; `mailto:`/`tel:` are rejected by the bridge, which requires a `://` scheme)." }
 
 [build-dependencies]
 tauri-plugin = { workspace = true, features = ["build"] }
@@ -31,9 +31,15 @@ log = { workspace = true }
 thiserror = { workspace = true }
 shared_child = "1"
 regex = "1"
-open = { version = "5", features = ["shellexecute-on-windows"] }
 encoding_rs = "0.8"
 os_pipe = "1"
+
+[target.'cfg(not(target_env = "ohos"))'.dependencies]
+open = { version = "5", features = ["shellexecute-on-windows"] }
+
+[target.'cfg(target_env = "ohos")'.dependencies]
+openharmony-ability-plugin-url = { path = "../../../openharmony-ability/crates/plugin-url" }
+url = { workspace = true }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 tauri = { workspace = true, features = ["wry"] }

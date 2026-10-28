@@ -8,6 +8,10 @@
     html_logo_url = "https://github.com/tauri-apps/tauri/raw/dev/app-icon.png",
     html_favicon_url = "https://github.com/tauri-apps/tauri/raw/dev/app-icon.png"
 )]
+// The `open` module (and its test items, referenced by the generated test
+// harness at the crate root) carries the plugin-wide deprecation notice —
+// silence deprecated-use lints in test builds only.
+#![cfg_attr(test, allow(deprecated))]
 
 use std::{
     collections::HashMap,
@@ -35,6 +39,17 @@ mod scope_entry;
 
 pub use error::Error;
 type Result<T> = std::result::Result<T, Error>;
+
+/// Clones the global OpenHarmony app handle set by the tauri runtime,
+/// or fails when the plugin is used before the app is initialized.
+#[cfg(target_env = "ohos")]
+pub(crate) fn ohos_app() -> crate::Result<tauri::ohos::openharmony_ability::OpenHarmonyApp> {
+    tauri::ohos::APP
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().cloned())
+        .ok_or_else(|| crate::Error::OpenharmonyAbility("OHOS APP not initialized".to_string()))
+}
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use tauri::plugin::PluginHandle;
@@ -71,11 +86,24 @@ impl<R: Runtime> Shell<R> {
     /// Open a (url) path with a default or specific browser opening program.
     ///
     /// See [`crate::open::open`] for how it handles security-related measures.
-    #[cfg(any(desktop, target_env = "ohos"))]
+    #[cfg(all(desktop, not(target_env = "ohos")))]
     #[deprecated(since = "2.1.0", note = "Use tauri-plugin-opener instead.")]
     #[allow(deprecated)]
     pub fn open(&self, path: impl Into<String>, with: Option<open::Program>) -> Result<()> {
         open::open(None, path.into(), with)
+    }
+
+    /// Open a (url) path in the system default application.
+    ///
+    /// OHOS: async — routed through the openharmony-ability bridge.
+    /// `with` is unsupported on OHOS and ignored (system default only).
+    ///
+    /// See [`crate::open::open`] for how it handles security-related measures.
+    #[cfg(target_env = "ohos")]
+    #[deprecated(since = "2.1.0", note = "Use tauri-plugin-opener instead.")]
+    #[allow(deprecated)]
+    pub async fn open(&self, path: impl Into<String>, with: Option<open::Program>) -> Result<()> {
+        open::open(None, path.into(), with).await
     }
 
     /// Open a (url) path with a default or specific browser opening program.

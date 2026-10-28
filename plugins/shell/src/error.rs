@@ -33,6 +33,12 @@ pub enum Error {
     /// Utf8 error.
     #[error(transparent)]
     Utf8(#[from] std::string::FromUtf8Error),
+    #[cfg(target_env = "ohos")]
+    #[error("OpenHarmony ability error: {0}")]
+    OpenharmonyAbility(String),
+    #[cfg(target_env = "ohos")]
+    #[error("invalid path: {0}")]
+    InvalidPath(String),
 }
 
 impl Serialize for Error {

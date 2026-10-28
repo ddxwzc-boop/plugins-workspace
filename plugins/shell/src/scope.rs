@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+#[cfg(not(target_env = "ohos"))]
 #[allow(deprecated)]
 use crate::open::Program;
 use crate::process::Command;
@@ -199,12 +200,9 @@ pub enum Error {
 }
 
 impl OpenScope {
-    /// Open a path in the default (or specified) browser.
-    ///
-    /// The path is validated against the `plugins > shell > open` validation regex, which
-    /// defaults to `^((mailto:\w+)|(tel:\w+)|(https?://\w+)).+`.
-    #[allow(deprecated)]
-    pub fn open(&self, path: &str, with: Option<Program>) -> Result<(), Error> {
+    /// Validates `path` against the `plugins > shell > open` validation regex,
+    /// which defaults to `^((mailto:\w+)|(tel:\w+)|(https?://\w+)).+`.
+    pub(crate) fn validate(&self, path: &str) -> Result<(), Error> {
         // ensure we pass validation if the configuration has one
         if let Some(regex) = &self.open {
             if !regex.is_match(path) {
@@ -220,6 +218,21 @@ impl OpenScope {
                 validation: "tauri^".to_string(), // purposefully impossible regex
             });
         }
+        Ok(())
+    }
+
+    /// Open a path in the default (or specified) browser.
+    ///
+    /// The path is validated against the `plugins > shell > open` validation regex, which
+    /// defaults to `^((mailto:\w+)|(tel:\w+)|(https?://\w+)).+`.
+    ///
+    /// OHOS note: this desktop-Linux dispatch (via the `open` crate's xdg-open/gio
+    /// helpers) does not exist on OHOS — the OHOS build routes through the
+    /// openharmony-ability bridge in [`crate::open::open`] instead.
+    #[cfg(not(target_env = "ohos"))]
+    #[allow(deprecated)]
+    pub fn open(&self, path: &str, with: Option<Program>) -> Result<(), Error> {
+        self.validate(path)?;
 
         // The prevention of argument escaping is handled by the usage of std::process::Command::arg by
         // the `open` dependency. This behavior should be re-confirmed during upgrades of `open`.
