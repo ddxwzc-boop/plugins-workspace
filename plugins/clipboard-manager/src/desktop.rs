@@ -226,14 +226,19 @@ impl<R: Runtime> Clipboard<R> {
     }
 
     // write_html on OHOS: bridge plugin facade via openharmony-ability-plugin-clipboard.
+    // alt_text rides the bridge as `altText` (Option-wire omit: None -> absent
+    // property) and lands as a coexisting text/plain pasteboard record beside
+    // the primary text/html record — arboard's set_html(html, alt) desktop
+    // contract. (Eulogizethesun/plugins-workspace#214)
     pub async fn write_html<'a, T: Into<Cow<'a, str>>>(
         &self,
         html: T,
-        _alt_text: Option<T>,
+        alt_text: Option<T>,
     ) -> crate::Result<()> {
         let client = clipboard_client()?;
+        let alt_text = alt_text.map(|t| t.into().into_owned());
         client
-            .write_html(html.into().to_string())
+            .write_html(html.into().to_string(), alt_text)
             .await
             .map_err(|e| crate::Error::Clipboard(e.to_string()))?;
         Ok(())

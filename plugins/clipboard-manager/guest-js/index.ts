@@ -164,7 +164,7 @@ async function readImage(): Promise<Image> {
  * #### Platform-specific
  *
  * - **Android / iOS:** Not supported.
- * - **HarmonyOS (OHOS):** Supported via pasteboard HTML MIME type. The `altText` parameter is ignored (OHOS clipboard does not support alternate representations).
+ * - **HarmonyOS (OHOS):** Supported via pasteboard HTML MIME type. `altText` is written as a coexisting plain-text (`text/plain`) pasteboard record (HTML stays the primary record), so plain-text paste targets and `readText` observe the plain version. An empty `altText` string is treated as omitted.
  *
  * @example
  * ```typescript
