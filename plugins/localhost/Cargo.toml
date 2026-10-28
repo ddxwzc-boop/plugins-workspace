@@ -14,7 +14,7 @@ linux = { level = "full", notes = "" }
 macos = { level = "full", notes = "" }
 android = { level = "none", notes = "" }
 ios = { level = "none", notes = "" }
-openharmony = { level = "partial", notes = "loopback-only bind (127.0.0.1); custom host is ignored" }
+openharmony = { level = "partial", notes = "loopback-only bind (127.0.0.1); custom host ignored with warning; bind failure fails app setup" }
 
 [dependencies]
 serde = { workspace = true }

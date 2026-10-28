@@ -73,6 +73,11 @@ impl Builder {
 
     pub fn build<R: Runtime>(mut self) -> TauriPlugin<R> {
         let port = self.port;
+        // OHOS keeps the raw Option so it can warn when a custom host is
+        // ignored; other platforms keep the original resolved String.
+        #[cfg(target_env = "ohos")]
+        let host = self.host;
+        #[cfg(not(target_env = "ohos"))]
         let host = self.host.unwrap_or("localhost".to_string());
         let on_request = self.on_request.take();
 
@@ -80,23 +85,46 @@ impl Builder {
             .setup(move |app, _api| {
                 let asset_resolver = app.asset_resolver();
 
+                // OHOS: the device resolver only maps loopback names in
+                // /etc/hosts, and `localhost` itself may resolve to ::1 only
+                // on OHOS musl (see openspec 2026-07-21-p1-localhost-ohos-fix),
+                // so the asset server always serves from the loopback
+                // address. A custom host is ignored with a warning instead
+                // of silently.
+                #[cfg(target_env = "ohos")]
+                if let Some(h) = host.as_deref() {
+                    if h != "localhost" && h != "127.0.0.1" {
+                        log::warn!(
+                            "[localhost plugin] OHOS serves from 127.0.0.1 only; ignoring custom host `{}`",
+                            h
+                        );
+                    }
+                }
+                // OHOS: bind synchronously here so a failure fails app setup
+                // (surfaces as Error::PluginInitialization) — a silently dead
+                // asset server is far harder to diagnose than a failed start.
+                // Binding is a fast syscall; the accept loop still runs on
+                // the spawned thread below.
+                #[cfg(target_env = "ohos")]
+                let bind_addr = format!("127.0.0.1:{}", port);
+                #[cfg(target_env = "ohos")]
+                let server = match Server::http(&bind_addr) {
+                    Ok(s) => {
+                        log::info!("[localhost plugin] listening on {}", bind_addr);
+                        s
+                    }
+                    Err(e) => {
+                        return Err(format!(
+                            "[localhost plugin] failed to bind {}: {}",
+                            bind_addr, e
+                        )
+                        .into());
+                    }
+                };
+
                 std::thread::spawn(move || {
-                    // OHOS: only the loopback address can be bound/listened on; external listening is restricted.
-                    #[cfg(target_env = "ohos")]
-                    let bind_addr = format!("127.0.0.1:{}", port);
                     #[cfg(not(target_env = "ohos"))]
                     let bind_addr = format!("{}:{}", host, port);
-                    #[cfg(target_env = "ohos")]
-                    let server = match Server::http(&bind_addr) {
-                        Ok(s) => {
-                            log::info!("[localhost plugin] listening on {}", bind_addr);
-                            s
-                        }
-                        Err(e) => {
-                            log::error!("[localhost plugin] failed to bind {}: {}", bind_addr, e);
-                            return;
-                        }
-                    };
                     #[cfg(not(target_env = "ohos"))]
                     let server = Server::http(&bind_addr).expect("Unable to spawn server");
                     for req in server.incoming_requests() {
