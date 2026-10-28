@@ -74,6 +74,7 @@ export async function unregister(protocol: string): Promise<null> {
  * ```
  *
  * #### - **macOS / Android / iOS**: Unsupported.
+ * #### - **OpenHarmony**: Unsupported, will reject — registration is static (build-time `module.json5`), not queryable at runtime.
  *
  * @since 2.0.0
  */
