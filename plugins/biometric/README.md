@@ -68,12 +68,14 @@ await authenticate('Open your wallet')
 
 ### OpenHarmony
 
-`authenticate` opens the system user authentication widget (face or fingerprint, whichever the device supports — only that type is offered; there is no automatic PIN fallback). Only a subset of `AuthOptions` is honored:
+`authenticate` opens the system user authentication widget (face or fingerprint, whichever the device supports). A subset of `AuthOptions` is honored:
 
 - `reason` — fallback for the dialog title.
-- `title` — the dialog title (falls back to `reason`, then "Authentication").
+- `title` — the dialog title (falls back to `reason`, then "Authentication"; max 500 characters).
+- `cancelTitle` — maps to the widget's navigation button (max 60 characters); tapping it rejects with `userFallback`. Only honored when `allowDeviceCredential` is `false` — the passcode scene cannot carry a custom navigation button (the same mutual exclusion as Android's negative button).
+- `allowDeviceCredential` — adds the lock-screen passcode to the widget's authentication factors: on biometric failure the widget shows a system button switching to passcode entry. On devices without biometric hardware this degrades to a passcode-only prompt; when no lock-screen passcode is set the call rejects with `passcodeNotSet`.
 
-The remaining options (`cancelTitle`, `fallbackTitle`, `subtitle`, `confirmationRequired`, `allowDeviceCredential`, `maxAttemps`) are not wired up on OHOS and are ignored (`cancelTitle`/`fallbackTitle` would map to the widget's `navigationButtonText`). `checkStatus` reports `isAvailable` plus `biometryType` (`1` fingerprint, `2` face).
+`fallbackTitle`, `subtitle`, `confirmationRequired` and `maxAttemps` have no counterpart in the OHOS widget (`WidgetParam` exposes only `title`, `navigationButtonText` and `uiContext`) and are ignored. `checkStatus` reports `isAvailable` plus `biometryType` (`1` fingerprint, `2` face).
 
 ## Contributing
 

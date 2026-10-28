@@ -98,21 +98,34 @@ export class BiometricPlugin extends Plugin {
     try {
       const args: AuthArgs = JSON.parse(invoke.parseArgs()) as AuthArgs;
 
-      // Widget auth requires EXACTLY ONE biometric authType — passing both
-      // FACE + FINGERPRINT is rejected with "authType check fail:0" → ret:8
-      // ("check permission and auth widget param failed"). Probe which type
-      // the device actually supports (shared with doStatus) and use the first
-      // available one. Only that type is offered — there is no automatic PIN
-      // fallback (PIN would have to be part of authType for passcode auth).
-      const authType = this.probeAuthType();
-      if (authType == null) {
-        invoke.reject('biometryNotAvailable', 'biometryNotAvailable');
-        return;
+      // Widget auth scenes are enumerated by the system (the
+      // start-authentication guide, "unified user-authentication widget"): {PIN}, {FACE},
+      // {FINGERPRINT}, {PIN,FACE}, {PIN,FINGERPRINT}, {PIN,FACE,FINGERPRINT},
+      // plus navigation-button scenes {FACE+nav}, {FINGERPRINT+nav},
+      // {FACE,FINGERPRINT+nav} (API 18+). A bare [FACE, FINGERPRINT] pair is
+      // NOT a scene — the historical "authType check fail:0" → ret:8 (12500008)
+      // rejection. PIN+biometric IS supported: on biometric failure the widget
+      // shows a system button switching to the lock-screen passcode (the
+      // allowDeviceCredential semantic).
+      const biometricType = this.probeAuthType();
+      let authTypes: userAuth.UserAuthType[];
+      let pinOnly = false;
+      if (args.allowDeviceCredential === true) {
+        authTypes = biometricType != null
+          ? [userAuth.UserAuthType.PIN, biometricType]
+          : [userAuth.UserAuthType.PIN]; // no biometric hardware → passcode-only prompt
+        pinOnly = biometricType == null;
+      } else {
+        if (biometricType == null) {
+          invoke.reject('biometryNotAvailable', 'biometryNotAvailable');
+          return;
+        }
+        authTypes = [biometricType];
       }
 
       const authParam: userAuth.AuthParam = {
         challenge: new Uint8Array([0]),
-        authType: [authType],
+        authType: authTypes,
         authTrustLevel: userAuth.AuthTrustLevel.ATL1
       };
 
@@ -131,6 +144,17 @@ export class BiometricPlugin extends Plugin {
         title: args.title != null ? args.title : (args.reason != null ? args.reason : 'Authentication'),
         uiContext: this.context
       };
+      // cancelTitle → the widget's navigation button (tapping it rejects with
+      // 'userFallback' via 12500011), capped at the documented 60 characters.
+      // Mutually exclusive with allowDeviceCredential: the passcode scene
+      // cannot carry a custom navigation button ("lock-screen passcode auth
+      // and custom business auth are mutually exclusive",
+      // apply-custom-authentication) — the same mutex as Android's
+      // BiometricActivity, which only sets the negative button when
+      // allowDeviceCredential is false.
+      if (args.cancelTitle != null && args.allowDeviceCredential !== true && args.cancelTitle.length > 0) {
+        widgetParam.navigationButtonText = args.cancelTitle.slice(0, 60);
+      }
 
       const authInstance = userAuth.getUserAuthInstance(authParam, widgetParam);
 
@@ -145,8 +169,13 @@ export class BiometricPlugin extends Plugin {
           } else {
             // Machine-readable code (userCancel/biometryLockout/…) goes in the
             // reject code channel — the Rust ErrorResponse surfaces it — not
-            // concatenated into the human message.
-            const errorCode = this.mapResultCode(result.result);
+            // concatenated into the human message. In the passcode-only scene
+            // NOT_ENROLLED means no lock-screen passcode is set — surface the
+            // cross-platform 'passcodeNotSet' vocabulary instead of the
+            // biometric-specific mapping.
+            const errorCode = pinOnly && result.result === userAuth.UserAuthResultCode.NOT_ENROLLED
+              ? 'passcodeNotSet'
+              : this.mapResultCode(result.result);
             invoke.reject('Authentication failed', errorCode);
           }
         }
