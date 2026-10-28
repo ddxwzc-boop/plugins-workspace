@@ -18,28 +18,41 @@ interface NotificationFeedbackArgs {
 
 // ─── Plugin Implementation ───
 
-// Maps Tauri ImpactFeedbackStyle (light/medium/heavy/soft/rigid) to OHOS
-// preset vibration effect IDs.
+// Maps Tauri ImpactFeedbackStyle (light/medium/heavy/soft/rigid) to an OHOS
+// preset vibration effect (effectId) plus a strength (intensity).
 //
-// The documented HapticFeedback presets (js-apis-vibrator) are only
-// 'haptic.effect.soft' (long, gentle, low-frequency), 'haptic.effect.hard'
-// (short, thick, strong) and 'haptic.effect.sharp' (short, sharp,
-// high-frequency) — there are no light/medium/heavy/rigid ids, so styles map
+// The simple documented HapticFeedback presets (js-apis-vibrator) are only
+// 'haptic.effect.soft' (gentle, low-frequency), 'haptic.effect.hard'
+// (heavy, mid-frequency) and 'haptic.effect.sharp' (sharp, high-frequency)
+// — there are no light/medium/heavy/rigid ids, so styles map
 // onto the closest documented preset rather than onto invented ids
 // (isSupportEffect would return false for those and every call would
 // silently degrade to the plain time-based fallback vibration).
-function impactStyleToEffectId(style: string): string {
+//
+// medium and heavy share 'haptic.effect.hard' and are separated only by
+// VibratePreset.intensity (API 12+, documented range: integers in (0,100],
+// default 100): medium plays at half strength, heavy at the default full
+// strength, so the two styles no longer issue identical vibrations. Per the
+// official docs, effects or devices that do not support intensity adjustment
+// vibrate at the default strength — the call still succeeds.
+interface ImpactPreset {
+  effectId: string;
+  intensity: number;
+}
+
+function impactStyleToPreset(style: string): ImpactPreset {
   switch (style) {
     case 'light':
     case 'soft':
-      return 'haptic.effect.soft';
+      return { effectId: 'haptic.effect.soft', intensity: 50 };
     case 'medium':
+      return { effectId: 'haptic.effect.hard', intensity: 50 };
     case 'heavy':
-      return 'haptic.effect.hard';
+      return { effectId: 'haptic.effect.hard', intensity: 100 };
     case 'rigid':
-      return 'haptic.effect.sharp';
+      return { effectId: 'haptic.effect.sharp', intensity: 50 };
     default:
-      return 'haptic.effect.soft';
+      return { effectId: 'haptic.effect.soft', intensity: 50 };
   }
 }
 
@@ -126,8 +139,8 @@ export class HapticsPlugin extends Plugin {
   private async doImpactFeedback(invoke: Invoke): Promise<void> {
     try {
       const args: ImpactFeedbackArgs = JSON.parse(invoke.parseArgs()) as ImpactFeedbackArgs;
-      const effectId = impactStyleToEffectId(args.style);
-      await this.vibratePresetWithFallback(effectId, 50, 30);
+      const preset = impactStyleToPreset(args.style);
+      await this.vibratePresetWithFallback(preset.effectId, preset.intensity, 30);
       invoke.resolve('');
     } catch (e) {
       const err = e as BusinessError;

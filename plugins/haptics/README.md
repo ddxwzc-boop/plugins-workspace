@@ -90,6 +90,28 @@ await notificationFeedback('warning')
 await selectionFeedback()
 ```
 
+## Platform Notes
+
+### OpenHarmony
+
+Feedback APIs are mapped onto the system preset vibration effects of `@ohos.vibrator` (`VibratePreset`):
+
+| API | Argument | Effect ID | Intensity |
+| --- | --- | --- | --- |
+| `impactFeedback` | `light`, `soft` | `haptic.effect.soft` | 50 |
+| `impactFeedback` | `medium` | `haptic.effect.hard` | 50 |
+| `impactFeedback` | `heavy` | `haptic.effect.hard` | 100 |
+| `impactFeedback` | `rigid` | `haptic.effect.sharp` | 50 |
+| `notificationFeedback` | `success` | `haptic.notice.success` | 60 |
+| `notificationFeedback` | `warning` | `haptic.notice.warning` | 60 |
+| `notificationFeedback` | `error` | `haptic.notice.fail` | 60 |
+| `selectionFeedback` | - | `haptic.effect.soft` | 40 |
+| `vibrate` | duration (ms) | time-based (`VibrateTime`) | - |
+
+- `intensity` is the OpenHarmony preset vibration strength (`VibratePreset.intensity`, API 12+). Its documented value range is all integers in `(0, 100]` with a default of `100`. `medium` and `heavy` share the `haptic.effect.hard` preset and are separated only by this strength value (50 vs 100). According to the official documentation, when the vibration effect or the device does not support intensity adjustment the motor vibrates at the default strength — the call still succeeds, but the two styles may feel identical on such devices.
+- The `haptic.notice.*` presets are only available from API 18+. When a device does not support a preset (checked via `vibrator.isSupportEffect`), the plugin falls back to a short time-based vibration (30 ms for impact, 50 ms for notification, 15 ms for selection).
+- Devices without a vibration motor reject feedback calls: `vibrator.startVibration` throws `BusinessError` 801 ("Capability not supported."), which surfaces as a rejected promise (e.g. `impactFeedback failed: ...`).
+
 ## Contributing
 
 PRs accepted. Please make sure to read the Contributing Guide before making a pull request.
