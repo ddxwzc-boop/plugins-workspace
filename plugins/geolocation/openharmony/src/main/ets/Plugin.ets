@@ -20,6 +20,11 @@ interface ClearWatchPayload {
   channelId: number;
 }
 
+interface WatchEntry {
+  request: geoLocationManager.ContinuousLocationRequest;
+  callback: (location: geoLocationManager.Location) => void;
+}
+
 interface Coordinates {
   latitude: number;
   longitude: number;
@@ -61,9 +66,14 @@ function permissionStateToString(state: number): string {
 }
 
 export class GeolocationPlugin extends Plugin {
-  private watchCallback: ((location: geoLocationManager.Location) => void) | null = null;
-  private watchRequest: geoLocationManager.ContinuousLocationRequest | null = null;
-  private watchChannelId: number | null = null;
+  // Multi-watch registry keyed by the Tauri IPC channel id (the watch id the
+  // JS API returns). One geoLocationManager.on('locationChange') subscription
+  // per watch — the official docs model multiple concurrent subscriptions
+  // (off('locationChange') without a callback cancels ALL subscriptions of
+  // the type), and off(callback) only cancels the subscription whose callback
+  // reference is identical to the one passed to on(), so each entry keeps
+  // its own request + callback pair.
+  private watchers: Map<number, WatchEntry> = new Map();
 
   // ─── Permission request fallback state ───
   // Tracks a pending requestPermissionsFromUser call so that it can be
@@ -166,28 +176,38 @@ export class GeolocationPlugin extends Plugin {
         return;
       }
 
-      // Clean up any previous watch
-      this.clearWatchInternal();
+      // Defensive: replace any watch previously registered on the same
+      // channel id (Rust allocates a fresh Channel per watchPosition call,
+      // so ids never collide in practice). Watches on other channels keep
+      // running — no more silent displacement.
+      this.removeWatcher(channelId);
 
-      this.watchChannelId = channelId;
-
+      // PositionOptions mapping for continuous locating:
+      //   enableHighAccuracy -> locationScenario: NAVIGATION (high precision +
+      //       real-time) vs DAILY_LIFE_SERVICE (low precision, power-friendly),
+      //       mirroring getCurrentPosition's LocatingPriority mapping.
+      //   timeout (ms) -> interval (s), floored to 1s: the W3C watchPosition
+      //       timeout is the max wait between callbacks, and Android maps it
+      //       to setMinUpdateIntervalMillis for watches. 0/unset keeps the
+      //       previous 1s default (the documented ContinuousLocationRequest
+      //       interval default is also 1s).
+      //   maximumAge: no continuous-locating analog — ignored (as on iOS).
       const request: geoLocationManager.ContinuousLocationRequest = {
-        interval: 1,
-        locationScenario: geoLocationManager.UserActivityScenario.NAVIGATION
+        interval: options.timeout > 0 ? Math.max(1, Math.floor(options.timeout / 1000)) : 1,
+        locationScenario: options.enableHighAccuracy
+          ? geoLocationManager.UserActivityScenario.NAVIGATION
+          : geoLocationManager.UserActivityScenario.DAILY_LIFE_SERVICE
       };
-      this.watchRequest = request;
 
-      const self = this;
+      // The closure captures its own channel id — no shared "current channel"
+      // field to race with other watchers.
       const callback = (location: geoLocationManager.Location): void => {
-        const cid = self.watchChannelId;
-        if (cid != null) {
-          const position = self.locationToPosition(location);
-          self.emit(cid, position);
-        }
+        this.emit(channelId, this.locationToPosition(location));
       };
-      this.watchCallback = callback;
 
       geoLocationManager.on('locationChange', request, callback);
+      const entry: WatchEntry = { request: request, callback: callback };
+      this.watchers.set(channelId, entry);
       invoke.resolve('');
     } catch (e) {
       const err = e as BusinessError;
@@ -199,21 +219,34 @@ export class GeolocationPlugin extends Plugin {
   // ─── clearWatch ───
 
   private handleClearWatch(invoke: Invoke): void {
-    this.clearWatchInternal();
-    invoke.resolve('');
+    try {
+      const payload: ClearWatchPayload = JSON.parse(invoke.parseArgs()) as ClearWatchPayload;
+      // Removing an unknown id is a harmless no-op (matches Android/iOS).
+      this.removeWatcher(payload.channelId);
+      invoke.resolve('');
+    } catch (e) {
+      const err = e as BusinessError;
+      console.error('[GeolocationPlugin] clearWatch failed: ' + err.message);
+      invoke.reject('clearWatch failed: ' + err.message);
+    }
   }
 
-  private clearWatchInternal(): void {
-    if (this.watchCallback != null) {
+  /**
+   * Tears down the watcher registered for `channelId` (no-op when absent).
+   * off('locationChange', callback) only cancels the subscription whose
+   * callback reference is identical to the one passed to on() — a mismatched
+   * callback silently cancels nothing, so the exact stored reference is used.
+   */
+  private removeWatcher(channelId: number): void {
+    const entry = this.watchers.get(channelId);
+    if (entry != null) {
       try {
-        geoLocationManager.off('locationChange', this.watchCallback);
+        geoLocationManager.off('locationChange', entry.callback);
       } catch (e) {
         console.warn('[GeolocationPlugin] clearWatch off failed: ' + (e as BusinessError).message);
       }
-      this.watchCallback = null;
+      this.watchers.delete(channelId);
     }
-    this.watchRequest = null;
-    this.watchChannelId = null;
   }
 
   // ─── checkPermissions ───

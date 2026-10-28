@@ -31,17 +31,21 @@ pub struct PermissionStatus {
 pub struct PositionOptions {
     /// High accuracy mode (such as GPS, if available)
     /// Will be ignored on Android 12+ if users didn't grant the ACCESS_FINE_LOCATION permission.
+    /// On OHOS watchPosition maps this to the location scenario (NAVIGATION vs DAILY_LIFE_SERVICE).
     pub enable_high_accuracy: bool,
     /// The maximum wait time in milliseconds for location updates.
     /// Default: 10000
     /// On Android the timeout gets ignored for getCurrentPosition.
+    /// On OHOS watchPosition maps it to the continuous-location report
+    /// interval (seconds, min 1); getCurrentPosition uses it as the
+    /// single-shot locating timeout.
     /// Ignored on iOS.
     // TODO: Handle Infinity and default to it.
     // TODO: Should be u64+ but specta doesn't like that?
     pub timeout: u32,
     /// The maximum age in milliseconds of a possible cached position that is acceptable to return.
     /// Default: 0
-    /// Ignored on iOS.
+    /// Ignored on iOS and OHOS.
     // TODO: Handle Infinity.
     // TODO: Should be u64+ but specta doesn't like that?
     pub maximum_age: u32,
