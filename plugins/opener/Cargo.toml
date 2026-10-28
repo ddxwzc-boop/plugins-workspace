@@ -17,7 +17,7 @@ linux = { level = "full", notes = "" }
 macos = { level = "full", notes = "" }
 android = { level = "partial", notes = "Only allows to open URLs via `open`" }
 ios = { level = "partial", notes = "Only allows to open URLs via `open`" }
-openharmony = { level = "partial", notes = "Opens URLs/paths with the system default application only (`with`/`inAppBrowser` unsupported); reveal shows the first item's parent in the file manager." }
+openharmony = { level = "partial", notes = "Opens URLs/paths with the system default application only (`with`/`inAppBrowser` unsupported); reveal opens the first item's parent directory in the Huawei file manager (`com.huawei.hmos.filemanager`) — see README for limitations." }
 
 
 [build-dependencies]

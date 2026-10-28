@@ -81,6 +81,11 @@ export async function openPath(path: string, openWith?: string): Promise<void> {
  * #### Platform-specific:
  *
  * - **Android / iOS:** Unsupported.
+ * - **HarmonyOS (OHOS):** Reveals the parent directory in the Huawei file
+ *   manager (`com.huawei.hmos.filemanager`); the item itself cannot be
+ *   highlighted, app-sandbox paths are rejected with a documented error, and
+ *   on systems without that file manager the error is propagated to the
+ *   caller. See the README's "OpenHarmony (OHOS) Platform Notes" section.
  *
  * @example
  * ```typescript

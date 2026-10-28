@@ -78,7 +78,12 @@ where
 }
 
 /// OHOS variant of [`reveal_item_in_dir`]: async — the reveal goes through the
-/// openharmony-ability bridge (TSFN → ArkTS file-manager Want).
+/// openharmony-ability bridge (TSFN → ArkTS file-manager Want). The ArkTS side
+/// launches the Huawei file manager (`com.huawei.hmos.filemanager`) with an
+/// explicit Want — the only form empirically verified to reach it (a generic
+/// `viewData` + `file://` Want falls through to the notepad handler). There is
+/// no fallback: on systems without that file manager the startAbility error is
+/// propagated to the caller.
 #[cfg(target_env = "ohos")]
 pub async fn reveal_item_in_dir<P: AsRef<Path>>(path: P) -> crate::Result<()> {
     reveal_items_in_dir(std::iter::once(path)).await
