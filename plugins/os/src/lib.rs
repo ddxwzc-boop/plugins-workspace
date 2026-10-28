@@ -131,11 +131,25 @@ pub fn exe_extension() -> &'static str {
 pub fn locale() -> Option<String> {
     #[cfg(target_env = "ohos")]
     {
-        // preferred_locales() is populated from AbilityInitContext during
-        // ability initialization (ArkTS ProcessInitializer sends device locale).
+        // Live value first: `onConfigurationUpdate` (NativeAbility) refreshes
+        // `app.config().language` on every system language change, so a running
+        // app sees the new locale without an Ability recreation. Fall back to
+        // the init snapshot (AbilityInitContext.preferredLocales, populated by
+        // ArkTS ProcessInitializer at ability creation) for cold start —
+        // `configuration.language` stays empty until the first ConfigChanged
+        // event lands. Empty strings map to None on both paths (a missing
+        // `context.config.language` makes the snapshot empty as well).
+        // Known edge: an Ability recreation without process death refreshes the
+        // snapshot but not the live value — a language change inside that exact
+        // window reads stale (same staleness class as tao's effective_theme).
         let guard = tauri::ohos::APP.lock().ok()?;
         let app = guard.as_ref()?;
-        app.preferred_locales()
+        let live = app.config().language;
+        if !live.is_empty() {
+            Some(live)
+        } else {
+            app.preferred_locales().filter(|l| !l.is_empty())
+        }
     }
     #[cfg(not(target_env = "ohos"))]
     sys_locale::get_locale()
