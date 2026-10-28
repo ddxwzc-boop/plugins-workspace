@@ -111,6 +111,21 @@ interface PendingNotification {
   schedule?: object;
 }
 
+// Wire shape of the guest ActiveNotification (models.rs `ActiveNotification`,
+// camelCase serde): id is required by the Rust model (no serde default — a
+// missing id fails the whole Vec deserialization, hence the `?? 0` fallback
+// at the call site); every other field is optional and defaults on the Rust
+// side when absent (Option fields -> None, defaulted fields -> empty).
+interface ActiveNotificationWire {
+  id: number;
+  tag?: string;
+  title?: string;
+  body?: string;
+  group?: string;
+  extra?: Record<string, Object>;
+  sound?: string;
+}
+
 interface ChannelConfig {
   id: string;
   name: string;
@@ -212,7 +227,7 @@ export class NotificationPlugin extends Plugin {
     commands.set('batch', (invoke: Invoke): void => { this.handleBatch(invoke); });
     commands.set('cancel', (invoke: Invoke): void => { this.handleCancel(invoke); });
     commands.set('removeActive', (invoke: Invoke): void => { this.handleRemoveActive(invoke); });
-    commands.set('getActive', (invoke: Invoke): void => { invoke.resolve(JSON.stringify([])); });
+    commands.set('getActive', (invoke: Invoke): void => { this.handleGetActive(invoke); });
     commands.set('getPending', (invoke: Invoke): void => { this.handleGetPending(invoke); });
     commands.set('requestPermissions', (invoke: Invoke): void => { this.handleRequestPermissions(invoke); });
     commands.set('checkPermissions', (invoke: Invoke): void => { this.handleCheckPermissions(invoke); });
@@ -277,6 +292,23 @@ export class NotificationPlugin extends Plugin {
     // sound: must be rawfile name or sandbox URI
     if (args.sound != null) {
       request.sound = args.sound;
+    }
+
+    // ongoing: system "ongoing notification" flag
+    // (NotificationRequest.isOngoing, @since 7)
+    if (args.ongoing != null) {
+      request.isOngoing = args.ongoing;
+    }
+
+    // group: system notification group (NotificationRequest.groupName, @since 8)
+    if (args.group != null) {
+      request.groupName = args.group;
+    }
+
+    // extra: stored on the system request (NotificationRequest.extraInfo,
+    // @since 7) so getActive can round-trip it back to the guest (#209)
+    if (args.extra != null) {
+      request.extraInfo = args.extra as Record<string, Object>;
     }
 
     // action buttons: look up registered action type and build NotificationActionButtons
@@ -1132,6 +1164,78 @@ export class NotificationPlugin extends Plugin {
     const at: ScheduleAt = { date: iso, repeating: true, allowWhileIdle: false };
     const wrapper: ScheduleWrapper = { at: at };
     return wrapper;
+  }
+
+  // ─── getActive ───
+
+  private handleGetActive(invoke: Invoke): void {
+    this.getActiveNotifications(invoke);
+  }
+
+  /**
+   * Lists the app's active (published, not yet removed) notifications from
+   * notificationManager.getActiveNotifications (#209) — the system is the
+   * source of truth, so the list survives app restarts.
+   *
+   * NotificationRequest → guest ActiveNotification mapping:
+   *   id → id (request id, defaults to 0 — required by the Rust model)
+   *   label → tag (never set by this plugin; normally absent)
+   *   content.{normal|longText|multiLine}.{title,text} → title/body
+   *   groupName → group
+   *   sound → sound
+   *   extraInfo → extra (round-trip of Options.extra via buildRequest)
+   * Not recoverable: schedule (already delivered), actionTypeId,
+   * attachments, groupSummary, data (kept empty) — no system equivalent.
+   *
+   * Error codes are 401/1600001/1600002/1600003 (service errors only), so a
+   * failure degrades to [] like getPending instead of rejecting.
+   */
+  private async getActiveNotifications(invoke: Invoke): Promise<void> {
+    try {
+      const requests: notificationManager.NotificationRequest[] =
+        await notificationManager.getActiveNotifications();
+      const active: ActiveNotificationWire[] = [];
+      for (const req of requests) {
+        let title: string | undefined = undefined;
+        let body: string | undefined = undefined;
+        const content = req.content;
+        if (content != null) {
+          if (content.normal != null) {
+            title = content.normal.title;
+            body = content.normal.text;
+          } else if (content.longText != null) {
+            title = content.longText.title;
+            body = content.longText.text;
+          } else if (content.multiLine != null) {
+            title = content.multiLine.title;
+            body = content.multiLine.text;
+          }
+        }
+        const wire: ActiveNotificationWire = {
+          id: req.id ?? 0,
+          title: title,
+          body: body
+        };
+        if (req.label != null) {
+          wire.tag = req.label;
+        }
+        if (req.groupName != null) {
+          wire.group = req.groupName;
+        }
+        if (req.sound != null) {
+          wire.sound = req.sound;
+        }
+        if (req.extraInfo != null) {
+          wire.extra = req.extraInfo as Record<string, Object>;
+        }
+        active.push(wire);
+      }
+      invoke.resolve(JSON.stringify(active));
+    } catch (e) {
+      const err = e as BusinessError;
+      console.error('[NotificationPlugin] getActive failed: ' + err.message);
+      invoke.resolve(JSON.stringify([]));
+    }
   }
 
   // ─── removeActive ───

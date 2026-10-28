@@ -80,10 +80,14 @@ interface Options {
    * Identifier used to group multiple notifications.
    *
    * https://developer.apple.com/documentation/usernotifications/unmutablenotificationcontent/1649872-threadidentifier
+   *
+   * On HarmonyOS (OHOS): maps to the system notification group name.
    */
   group?: string
   /**
    * Instructs the system that this notification is the summary of a group on Android.
+   *
+   * On HarmonyOS (OHOS): ignored — no system equivalent.
    */
   groupSummary?: boolean
   /**
@@ -108,24 +112,35 @@ interface Options {
    * Notification icon.
    *
    * On Android the icon must be placed in the app's `res/drawable` folder.
+   *
+   * On HarmonyOS (OHOS): ignored — decoded PixelMap icons are not wired up.
    */
   icon?: string
   /**
    * Notification large icon (Android).
    *
    * The icon must be placed in the app's `res/drawable` folder.
+   *
+   * On HarmonyOS (OHOS): ignored — decoded PixelMap icons are not wired up.
    */
   largeIcon?: string
   /**
    * Icon color on Android.
+   *
+   * On HarmonyOS (OHOS): ignored — no system equivalent.
    */
   iconColor?: string
   /**
    * Notification attachments.
+   *
+   * On HarmonyOS (OHOS): ignored — no system equivalent.
    */
   attachments?: Attachment[]
   /**
    * Extra payload to store in the notification.
+   *
+   * On HarmonyOS (OHOS): round-trips through `active()` (stored in the
+   * system notification request).
    */
   extra?: Record<string, unknown>
   /**
@@ -134,6 +149,8 @@ interface Options {
    * An application service must manage the dismissal of the notification.
    * It is typically used to indicate a background task that is pending (e.g. a file download)
    * or the user is engaged with (e.g. playing music).
+   *
+   * On HarmonyOS (OHOS): maps to the system ongoing-notification flag.
    */
   ongoing?: boolean
   /**
@@ -142,6 +159,8 @@ interface Options {
   autoCancel?: boolean
   /**
    * Changes the notification presentation to be silent on iOS (no badge, no sound, not listed).
+   *
+   * On HarmonyOS (OHOS): ignored — no per-notification system equivalent.
    */
   silent?: boolean
   /**
@@ -488,6 +507,16 @@ async function cancelAll(): Promise<void> {
 /**
  * Retrieves the list of active notifications.
  *
+ * #### Platform-specific
+ *
+ * - **HarmonyOS (OHOS):** Sourced from the system's live list
+ *   (`getActiveNotifications`), so it survives app restarts. Populated:
+ *   `id`, `title`, `body` and `extra` (round-trips
+ *   {@link Options.extra}). Carried through when the system reports
+ *   them: `group`, `sound` and `tag` (the plugin itself never sets the
+ *   system notification label). Always empty: `data`, `attachments`,
+ *   `groupSummary`, `actionTypeId` and `schedule` (no system equivalent).
+ *
  * @example
  * ```typescript
  * import { active } from '@tauri-apps/plugin-notification';
@@ -540,6 +569,17 @@ async function removeAllActive(): Promise<void> {
 
 /**
  * Creates a notification channel.
+ *
+ * #### Platform-specific
+ *
+ * - **HarmonyOS (OHOS):** Channels map onto the system's four notification
+ *   slot types (derived from `importance`); the system keeps a single slot
+ *   per type. `sound`, `lights`, `lightColor`, `vibration` and `visibility`
+ *   are kept in a local table (returned by {@link channels}) but the system
+ *   slot itself uses its default configuration — HarmonyOS exposes no
+ *   public API to customize a slot, so channels sharing the same
+ *   `importance` share one system slot (a runtime warning is logged when
+ *   that happens). Per-notification {@link Options.sound} still applies.
  *
  * @example
  * ```typescript
